@@ -1,0 +1,26 @@
+# CropRadar Python dependencies
+
+# --- Web framework ---
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9      # required for FastAPI file uploads
+
+# --- Telegram bot ---
+python-telegram-bot>=21.0
+
+# --- Vision AI ---
+google-generativeai>=0.5.0   # Gemini Vision (primary)
+openai>=1.20.0                # GPT-4o Vision (alternative)
+
+# --- Dashboard ---
+streamlit>=1.33.0
+folium>=0.16.0
+streamlit-folium>=0.20.0
+
+# --- Data ---
+pandas>=2.0.0
+
+# --- Utilities ---
+pillow>=10.0.0
+requests>=2.31.0
+python-dotenv>=1.0.0
