@@ -19,6 +19,8 @@ from pydantic import BaseModel
 
 import database
 import vision_diagnosis
+import audio_transcription
+
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -71,6 +73,10 @@ class ReportResponse(BaseModel):
 class AlertsResponse(BaseModel):
     outbreaks: list[dict]
     alert_message: Optional[str] = None
+
+
+class TranscriptionResponse(BaseModel):
+    text: str
 
 
 # ---------------------------------------------------------------------------
@@ -223,4 +229,33 @@ def get_nearby_alerts(
     )
     alert_message = OUTBREAK_TEMPLATE if outbreaks else None
     return NearbyAlertsResponse(outbreaks=outbreaks, alert_message=alert_message)
+
+
+@app.post("/transcribe-audio", response_model=TranscriptionResponse, tags=["audio"])
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    language: str = Form("en"),
+):
+    """
+    Accept an audio file (OGG/MP3), run Audio AI transcription and return text.
+    """
+    suffix = Path(file.filename or "audio.ogg").suffix or ".ogg"
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+    try:
+        with os.fdopen(tmp_fd, "wb") as tmp_file:
+            shutil.copyfileobj(file.file, tmp_file)
+        
+        try:
+            text = audio_transcription.transcribe_audio_file(tmp_path, language=language)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Audio AI error: {exc}") from exc
+            
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    return TranscriptionResponse(text=text)
+
 

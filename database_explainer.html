@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CropRadar · database.py Explorer</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --card: #1c2128;
+    --border: #30363d; --text: #e6edf3; --muted: #8b949e;
+    --green: #3fb950; --blue: #58a6ff; --orange: #d29922;
+    --purple: #bc8cff; --red: #f85149; --teal: #39d353;
+    --accent: #238636; --highlight: #264f78;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:'Inter',sans-serif; min-height:100vh; }
+
+  /* ── Header ── */
+  header {
+    background: linear-gradient(135deg,#0f2027,#203a43,#2c5364);
+    padding: 32px 40px;
+    border-bottom: 1px solid var(--border);
+    display:flex; align-items:center; gap:20px;
+  }
+  .logo { font-size:2rem; }
+  header h1 { font-size:1.6rem; font-weight:700; color:#fff; }
+  header p  { font-size:.9rem; color:var(--muted); margin-top:4px; }
+  .badge {
+    background:var(--accent); color:#fff; font-size:.7rem;
+    padding:3px 10px; border-radius:20px; font-weight:600;
+  }
+
+  /* ── Layout ── */
+  .layout { display:grid; grid-template-columns:1fr 420px; gap:0; height:calc(100vh - 120px); }
+  .left  { overflow-y:auto; padding:24px 28px; border-right:1px solid var(--border); }
+  .right { overflow-y:auto; padding:24px; background:var(--surface); }
+
+  /* ── Tabs ── */
+  .tabs { display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap; }
+  .tab {
+    padding:8px 18px; border-radius:8px; border:1px solid var(--border);
+    background:var(--card); color:var(--muted); font-size:.82rem;
+    cursor:pointer; transition:.2s;
+  }
+  .tab:hover { border-color:var(--blue); color:var(--blue); }
+  .tab.active { background:var(--blue); color:#fff; border-color:var(--blue); font-weight:600; }
+
+  /* ── Section titles ── */
+  .section-title {
+    font-size:.7rem; font-weight:700; text-transform:uppercase;
+    letter-spacing:1.5px; color:var(--muted); margin-bottom:14px;
+    padding-bottom:6px; border-bottom:1px solid var(--border);
+  }
+
+  /* ── Code block ── */
+  .code-block {
+    background:#010409; border:1px solid var(--border); border-radius:10px;
+    overflow:hidden; font-family:'JetBrains Mono',monospace; font-size:.82rem;
+  }
+  .code-line {
+    display:flex; align-items:stretch; cursor:pointer;
+    transition:background .15s;
+    border-left:3px solid transparent;
+  }
+  .code-line:hover   { background:#1f2937; }
+  .code-line.active  { background:#1a2744; border-left-color:var(--blue); }
+  .code-line.section-start { border-top:1px solid #21262d; }
+  .line-num {
+    min-width:44px; padding:4px 10px; color:#484f58; text-align:right;
+    background:#0d1117; user-select:none; font-size:.75rem;
+    border-right:1px solid #21262d;
+  }
+  .line-code { padding:4px 14px; white-space:pre; flex:1; line-height:1.7; }
+  .line-code .kw   { color:#ff7b72; }
+  .line-code .fn   { color:#d2a8ff; }
+  .line-code .str  { color:#a5d6ff; }
+  .line-code .cmt  { color:#8b949e; font-style:italic; }
+  .line-code .num  { color:#79c0ff; }
+  .line-code .cls  { color:#ffa657; }
+  .line-code .op   { color:#ff7b72; }
+
+  /* ── Annotation panel ── */
+  .annotation {
+    background: linear-gradient(135deg,#1c2752,#1a3040);
+    border:1px solid #30363d; border-radius:10px; padding:16px;
+    margin-top:16px; display:none; animation:fadeIn .2s ease;
+  }
+  .annotation.visible { display:block; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
+  .ann-tag {
+    display:inline-block; font-size:.68rem; font-weight:700;
+    padding:2px 8px; border-radius:4px; margin-bottom:8px;
+    text-transform:uppercase; letter-spacing:1px;
+  }
+  .tag-schema  { background:#21262d; color:var(--orange); }
+  .tag-config  { background:#21262d; color:var(--green); }
+  .tag-fn      { background:#21262d; color:var(--purple); }
+  .tag-sql     { background:#21262d; color:var(--blue); }
+  .tag-geo     { background:#21262d; color:var(--teal); }
+  .tag-import  { background:#21262d; color:var(--muted); }
+  .ann-title   { font-size:.95rem; font-weight:700; margin-bottom:6px; color:#fff; }
+  .ann-body    { font-size:.82rem; color:#cdd9e5; line-height:1.7; }
+  .ann-body code {
+    background:#0d1117; color:var(--blue); padding:1px 5px;
+    border-radius:3px; font-family:'JetBrains Mono',monospace; font-size:.8em;
+  }
+
+  /* ── Schema ── */
+  .schema-card {
+    background:var(--card); border:1px solid var(--border);
+    border-radius:12px; overflow:hidden; margin-bottom:20px;
+  }
+  .schema-header {
+    background: linear-gradient(90deg,#1e3a5f,#1a3040);
+    padding:12px 18px; display:flex; align-items:center; gap:10px;
+  }
+  .table-icon { font-size:1.2rem; }
+  .table-name { font-size:1rem; font-weight:700; color:var(--blue); font-family:'JetBrains Mono',monospace; }
+  .schema-body { padding:4px 0; }
+  .col-row {
+    display:grid; grid-template-columns:24px 140px 80px 1fr;
+    padding:9px 18px; gap:10px; align-items:center;
+    border-bottom:1px solid #21262d; font-size:.8rem;
+    transition:background .15s;
+  }
+  .col-row:hover { background:#21262d; }
+  .col-row:last-child { border-bottom:none; }
+  .pk-icon { font-size:.9rem; }
+  .col-name { font-family:'JetBrains Mono',monospace; color:var(--text); font-weight:600; }
+  .col-type { color:var(--orange); font-family:'JetBrains Mono',monospace; font-size:.75rem; }
+  .col-desc { color:var(--muted); font-size:.75rem; }
+  .constraint {
+    display:inline-block; font-size:.6rem; padding:1px 6px;
+    border-radius:3px; margin-left:4px; font-weight:700;
+  }
+  .c-pk  { background:#1f3a28; color:var(--teal); }
+  .c-nn  { background:#3a1f1f; color:var(--red); }
+  .c-opt { background:#1f2a3a; color:var(--muted); }
+
+  /* ── Functions list ── */
+  .fn-card {
+    background:var(--card); border:1px solid var(--border);
+    border-radius:10px; padding:14px 18px; margin-bottom:12px;
+    cursor:pointer; transition:.2s;
+  }
+  .fn-card:hover { border-color:var(--blue); transform:translateX(3px); }
+  .fn-sig  { font-family:'JetBrains Mono',monospace; font-size:.82rem; color:var(--purple); }
+  .fn-desc { font-size:.8rem; color:var(--muted); margin-top:5px; line-height:1.6; }
+  .fn-badge { font-size:.65rem; padding:2px 7px; border-radius:4px; font-weight:700; margin-right:5px; }
+  .fn-write { background:#1f3a20; color:var(--green); }
+  .fn-read  { background:#1a2744; color:var(--blue); }
+  .fn-geo   { background:#1f2a3a; color:var(--teal); }
+  .fn-init  { background:#2a1f3a; color:var(--purple); }
+
+  /* ── Flow diagram ── */
+  .flow { display:flex; flex-direction:column; align-items:center; gap:0; }
+  .flow-node {
+    background:var(--card); border:2px solid var(--border);
+    border-radius:10px; padding:12px 22px; text-align:center;
+    font-size:.82rem; min-width:220px; position:relative;
+  }
+  .flow-node.caller  { border-color:var(--orange); }
+  .flow-node.db      { border-color:var(--blue); }
+  .flow-node.result  { border-color:var(--green); }
+  .flow-node strong { display:block; font-size:.9rem; margin-bottom:3px; }
+  .flow-arrow { font-size:1.4rem; color:var(--muted); line-height:1.2; }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width:6px; }
+  ::-webkit-scrollbar-track { background:var(--bg); }
+  ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+
+  /* ── Responsive ── */
+  @media(max-width:900px) {
+    .layout { grid-template-columns:1fr; height:auto; }
+    .right  { border-top:1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">🌾</span>
+  <div>
+    <h1>CropRadar · <code style="font-family:'JetBrains Mono',monospace;font-size:1.3rem;">database.py</code> Explorer</h1>
+    <p>Interactive line-by-line explanation + SQLite schema visualization</p>
+  </div>
+  <span class="badge">SQLite · 165 lines</span>
+</header>
+
+<div class="layout">
+
+  <!-- LEFT: Code with annotations -->
+  <div class="left">
+    <div class="tabs">
+      <div class="tab active" onclick="showPanel('code')">📄 Code Walkthrough</div>
+      <div class="tab" onclick="showPanel('schema')">🗄️ DB Schema</div>
+      <div class="tab" onclick="showPanel('functions')">⚙️ Functions</div>
+      <div class="tab" onclick="showPanel('flow')">🔄 Data Flow</div>
+    </div>
+
+    <!-- CODE PANEL -->
+    <div id="panel-code">
+      <div class="section-title">Click any line to see its explanation →</div>
+      <div class="code-block" id="codeview"></div>
+      <div class="annotation" id="ann-box">
+        <span class="ann-tag" id="ann-tag"></span>
+        <div class="ann-title" id="ann-title"></div>
+        <div class="ann-body"  id="ann-body"></div>
+      </div>
+    </div>
+
+    <!-- SCHEMA PANEL -->
+    <div id="panel-schema" style="display:none">
+      <div class="section-title">disease_reports — the only table in the database</div>
+      <div class="schema-card">
+        <div class="schema-header">
+          <span class="table-icon">📋</span>
+          <span class="table-name">disease_reports</span>
+        </div>
+        <div class="schema-body">
+          <div class="col-row">
+            <span class="pk-icon">🔑</span>
+            <span class="col-name">id</span>
+            <span class="col-type">INTEGER</span>
+            <span class="col-desc">Auto-incremented primary key. Unique ID for every disease report. <span class="constraint c-pk">PK</span><span class="constraint c-nn">AUTOINCREMENT</span></span>
+          </div>
+          <div class="col-row">
+            <span class="pk-icon">🌿</span>
+            <span class="col-name">disease_type</span>
+            <span class="col-type">TEXT</span>
+            <span class="col-desc">Name of the detected plant disease (e.g. "Leaf Blight"). <span class="constraint c-nn">NOT NULL</span></span>
+          </div>
+          <div class="col-row">
+            <span class="pk-icon">📊</span>
+            <span class="col-name">confidence</span>
+            <span class="col-type">TEXT</span>
+            <span class="col-desc">AI model's confidence score as text (e.g. "92.3%"). <span class="constraint c-opt">OPTIONAL</span></span>
+          </div>
+          <div class="col-row">
+            <span class="pk-icon">💊</span>
+            <span class="col-name">remedy</span>
+            <span class="col-type">TEXT</span>
+            <span class="col-desc">Recommended treatment / remedy for this disease. <span class="constraint c-opt">OPTIONAL</span></span>
+          </div>
+          <div class="col-row">
+            <span class="pk-icon">🛡️</span>
+            <span class="col-name">prevention</span>
+            <span class="col-type">TEXT</span>
+            <span class="col-desc">Preventive measures to avoid future outbreaks. <span class="constraint c-opt">OPTIONAL</span></span>
+          </div>
+          <div class="col-row">
+            <span class="pk-icon">📍</span>
+            <span class="col-name">latitude</span>
+            <span class="col-type">REAL</span>
+            <span class="col-desc">GPS latitude of the farm where report was filed (e.g. 28.6139). <span class="constraint c-opt">OPTIONAL</span></span>
+          </div>
+          <div class="col-row">
+            <span class="pk-icon">📍</span>
+            <span class="col-name">longitude</span>
+            <span class="col-type">REAL</span>
+            <span class="col-desc">GPS longitude of the farm where report was filed (e.g. 77.2090). <span class="constraint c-opt">OPTIONAL</span></span>
+          </div>
+          <div class="col-row">
+            <span class="pk-icon">🕐</span>
+            <span class="col-name">timestamp</span>
+            <span class="col-type">TEXT</span>
+            <span class="col-desc">UTC ISO-8601 datetime when the report was saved (e.g. "2026-03-30T10:00:00"). <span class="constraint c-nn">NOT NULL</span></span>
+          </div>
+        </div>
+      </div>
+      <div class="section-title" style="margin-top:20px">Why these columns?</div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;font-size:.82rem;color:var(--muted);line-height:1.9;">
+        <b style="color:var(--text)">disease_type + timestamp</b> — core required data. Every analysis must have these two.<br>
+        <b style="color:var(--text)">confidence + remedy + prevention</b> — AI output fields, nullable because early versions may skip them.<br>
+        <b style="color:var(--text)">latitude + longitude</b> — optional geo-tagging. Null = farmer didn't share location. When present, enables the <code style="color:var(--blue);background:#010409;padding:1px 5px;border-radius:3px">get_nearby_outbreak_risk()</code> geo-query.<br>
+        <b style="color:var(--text)">id</b> — auto-increment keeps inserts simple; no need to generate IDs externally.
+      </div>
+    </div>
+
+    <!-- FUNCTIONS PANEL -->
+    <div id="panel-functions" style="display:none">
+      <div class="section-title">All functions defined in database.py</div>
+
+      <div class="fn-card">
+        <div><span class="fn-badge fn-init">INIT</span> <span class="fn-sig">get_connection() → sqlite3.Connection</span></div>
+        <div class="fn-desc">Opens a connection to <code>cropradar.db</code>. Sets <code>row_factory = sqlite3.Row</code> so every fetched row behaves like a dictionary (access by column name instead of index).</div>
+      </div>
+
+      <div class="fn-card">
+        <div><span class="fn-badge fn-init">INIT</span> <span class="fn-sig">init_db() → None</span></div>
+        <div class="fn-desc">Called once at startup. Runs the <code>CREATE TABLE IF NOT EXISTS</code> SQL to ensure the <code>disease_reports</code> table exists before any reads or writes.</div>
+      </div>
+
+      <div class="fn-card">
+        <div><span class="fn-badge fn-write">WRITE</span> <span class="fn-sig">insert_report(disease_type, confidence, remedy, prevention, latitude?, longitude?) → int</span></div>
+        <div class="fn-desc">Inserts one new disease report. Auto-generates a UTC timestamp. Returns the new row's <code>id</code> so the caller knows which record was created.</div>
+      </div>
+
+      <div class="fn-card">
+        <div><span class="fn-badge fn-read">READ</span> <span class="fn-sig">get_all_reports() → list[dict]</span></div>
+        <div class="fn-desc">Returns every row in the table, sorted newest-first. Used for dashboards and full history views.</div>
+      </div>
+
+      <div class="fn-card">
+        <div><span class="fn-badge fn-read">READ</span> <span class="fn-sig">get_recent_reports_by_disease(disease_type, hours=48) → list[dict]</span></div>
+        <div class="fn-desc">Filters reports to a specific disease within a time window (default 48 h). Useful for tracking how many times "Leaf Blight" was reported this week.</div>
+      </div>
+
+      <div class="fn-card">
+        <div><span class="fn-badge fn-read">READ</span> <span class="fn-sig">get_outbreak_diseases(threshold=3, hours=48) → list[dict]</span></div>
+        <div class="fn-desc"><b>Outbreak detector.</b> Groups all reports by disease, counts them within the time window, and keeps only those reaching the threshold. Returns <code>[{disease_type, count}, ...]</code> sorted by severity.</div>
+      </div>
+
+      <div class="fn-card">
+        <div><span class="fn-badge fn-geo">GEO</span> <span class="fn-sig">_haversine_km(lat1, lon1, lat2, lon2) → float</span></div>
+        <div class="fn-desc">Private helper. Calculates the great-circle distance in km between two GPS coordinates using the Haversine formula. No external libraries needed — pure math.</div>
+      </div>
+
+      <div class="fn-card">
+        <div><span class="fn-badge fn-geo">GEO</span> <span class="fn-sig">get_nearby_outbreak_risk(lat, lon, radius_km=50, threshold=3, hours=48) → list[dict]</span></div>
+        <div class="fn-desc"><b>Geo-aware outbreak detector.</b> Fetches recent geo-tagged reports, computes distance using Haversine for each row, and counts only those within <code>radius_km</code>. Returns diseases at risk near a given farm location.</div>
+      </div>
+    </div>
+
+    <!-- FLOW PANEL -->
+    <div id="panel-flow" style="display:none">
+      <div class="section-title">How a disease report flows through the system</div>
+      <div class="flow">
+        <div class="flow-node caller" style="background:linear-gradient(135deg,#2a1f0f,#1f1a00)">
+          <strong>🤖 AI Model (app.py)</strong>
+          Detects disease from crop photo<br>
+          <span style="font-size:.72rem;color:var(--muted)">disease_type, confidence, remedy, prevention, lat, lon</span>
+        </div>
+        <div class="flow-arrow">⬇</div>
+        <div class="flow-node db" style="background:linear-gradient(135deg,#0f1f3a,#001a30)">
+          <strong>📥 insert_report()</strong>
+          Adds UTC timestamp<br>Inserts row → returns new <code>id</code>
+        </div>
+        <div class="flow-arrow">⬇</div>
+        <div class="flow-node" style="border-color:var(--orange);background:linear-gradient(135deg,#1f1a00,#0f1a00)">
+          <strong>🗄️ disease_reports table</strong>
+          SQLite file: <code>cropradar.db</code>
+        </div>
+        <div class="flow-arrow">⬇</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;max-width:480px">
+          <div class="flow-node result" style="background:linear-gradient(135deg,#0f2a1a,#001f10);min-width:0">
+            <strong>📊 Dashboard</strong>
+            get_all_reports()<br>
+            <span style="font-size:.7rem;color:var(--muted)">All history, newest first</span>
+          </div>
+          <div class="flow-node" style="border-color:var(--teal);background:linear-gradient(135deg,#001f2a,#00152a);min-width:0">
+            <strong>🗺️ Map Alert</strong>
+            get_nearby_outbreak_risk()<br>
+            <span style="font-size:.7rem;color:var(--muted)">Within 50 km radius</span>
+          </div>
+        </div>
+        <div class="flow-arrow">⬇</div>
+        <div class="flow-node" style="border-color:var(--red);background:linear-gradient(135deg,#2a0f0f,#1f0000)">
+          <strong>🚨 Outbreak Alert</strong>
+          get_outbreak_diseases()<br>
+          <span style="font-size:.72rem;color:var(--muted)">If ≥ 3 reports in 48h → WARNING</span>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /.left -->
+
+  <!-- RIGHT: always-visible quick reference -->
+  <div class="right">
+    <div class="section-title">Quick Reference</div>
+
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:16px;font-size:.8rem;">
+      <div style="color:var(--blue);font-weight:700;margin-bottom:8px">📁 File: database.py</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;color:var(--muted);">
+        <span>Engine</span><span style="color:var(--text)">SQLite3 (built-in)</span>
+        <span>DB file</span><span style="color:var(--teal);font-family:'JetBrains Mono',monospace">cropradar.db</span>
+        <span>Tables</span><span style="color:var(--text)">1 (disease_reports)</span>
+        <span>Columns</span><span style="color:var(--text)">8</span>
+        <span>Functions</span><span style="color:var(--text)">8</span>
+        <span>Lines</span><span style="color:var(--text)">165</span>
+      </div>
+    </div>
+
+    <div class="section-title">Sections at a Glance</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">
+      <div onclick="highlightGroup('imports')"   style="cursor:pointer;background:#1c2128;border:1px solid #30363d;border-radius:8px;padding:10px 14px;font-size:.8rem;transition:.2s" onmouseover="this.style.borderColor='#58a6ff'" onmouseout="this.style.borderColor='#30363d'">
+        <span style="color:var(--muted)">Lines 1–10</span>   · <b style="color:var(--text)">Imports & Config</b><br>
+        <span style="color:var(--muted);font-size:.75rem">sqlite3, datetime, path constant</span>
+      </div>
+      <div onclick="highlightGroup('schema')"    style="cursor:pointer;background:#1c2128;border:1px solid #30363d;border-radius:8px;padding:10px 14px;font-size:.8rem;transition:.2s" onmouseover="this.style.borderColor='#d29922'" onmouseout="this.style.borderColor='#30363d'">
+        <span style="color:var(--muted)">Lines 12–39</span>  · <b style="color:var(--orange)">Schema & Init</b><br>
+        <span style="color:var(--muted);font-size:.75rem">CREATE TABLE SQL, get_connection(), init_db()</span>
+      </div>
+      <div onclick="highlightGroup('write')"     style="cursor:pointer;background:#1c2128;border:1px solid #30363d;border-radius:8px;padding:10px 14px;font-size:.8rem;transition:.2s" onmouseover="this.style.borderColor='#3fb950'" onmouseout="this.style.borderColor='#30363d'">
+        <span style="color:var(--muted)">Lines 42–65</span>  · <b style="color:var(--green)">Write Operations</b><br>
+        <span style="color:var(--muted);font-size:.75rem">insert_report()</span>
+      </div>
+      <div onclick="highlightGroup('read')"      style="cursor:pointer;background:#1c2128;border:1px solid #30363d;border-radius:8px;padding:10px 14px;font-size:.8rem;transition:.2s" onmouseover="this.style.borderColor='#58a6ff'" onmouseout="this.style.borderColor='#30363d'">
+        <span style="color:var(--muted)">Lines 68–109</span> · <b style="color:var(--blue)">Read Operations</b><br>
+        <span style="color:var(--muted);font-size:.75rem">get_all_reports(), recent by disease, outbreak</span>
+      </div>
+      <div onclick="highlightGroup('geo')"       style="cursor:pointer;background:#1c2128;border:1px solid #30363d;border-radius:8px;padding:10px 14px;font-size:.8rem;transition:.2s" onmouseover="this.style.borderColor='#39d353'" onmouseout="this.style.borderColor='#30363d'">
+        <span style="color:var(--muted)">Lines 112–165</span>· <b style="color:var(--teal)">Geo-spatial</b><br>
+        <span style="color:var(--muted);font-size:.75rem">Haversine distance, nearby outbreak risk</span>
+      </div>
+    </div>
+
+    <div class="section-title">Key Concepts</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:.78rem">
+        <b style="color:var(--orange)">row_factory = sqlite3.Row</b><br>
+        <span style="color:var(--muted)">Makes query results addressable like <code style="color:var(--blue);background:#010409;padding:0 4px;border-radius:3px">row["column_name"]</code> instead of <code style="color:var(--blue);background:#010409;padding:0 4px;border-radius:3px">row[0]</code></span>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:.78rem">
+        <b style="color:var(--green)">Parameterised queries <code style="font-size:.9em">(?)</code></b><br>
+        <span style="color:var(--muted)">Prevents SQL injection. Values are passed as a tuple, never string-concatenated.</span>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:.78rem">
+        <b style="color:var(--teal)">Haversine Formula</b><br>
+        <span style="color:var(--muted)">Calculates real-world km distance between GPS coordinates on a sphere — no PostGIS needed.</span>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:.78rem">
+        <b style="color:var(--purple)">with get_connection() as conn</b><br>
+        <span style="color:var(--muted)">Context manager auto-commits on success and rolls back on error — safe transactions.</span>
+      </div>
+    </div>
+  </div><!-- /.right -->
+
+</div><!-- /.layout -->
+
+<script>
+// ── Raw source lines ──────────────────────────────────────────────────────────
+const RAW = [
+  ['"""', ''],
+  ['database.py - SQLite database layer for CropRadar', ''],
+  ['"""', ''],
+  ['', ''],
+  ['import math', ''],
+  ['import sqlite3', ''],
+  ['from datetime import datetime, timedelta', ''],
+  ['from typing import Optional', ''],
+  ['', ''],
+  ['DB_PATH = "cropradar.db"', ''],
+  ['', ''],
+  ['# ---------------------------------------------------------------------------', ''],
+  ['# Schema', ''],
+  ['# ---------------------------------------------------------------------------', ''],
+  ['', ''],
+  ['CREATE_TABLE_SQL = """', ''],
+  ['CREATE TABLE IF NOT EXISTS disease_reports (', ''],
+  ['    id            INTEGER PRIMARY KEY AUTOINCREMENT,', ''],
+  ['    disease_type  TEXT    NOT NULL,', ''],
+  ['    confidence    TEXT,', ''],
+  ['    remedy        TEXT,', ''],
+  ['    prevention    TEXT,', ''],
+  ['    latitude      REAL,', ''],
+  ['    longitude     REAL,', ''],
+  ['    timestamp     TEXT    NOT NULL', ''],
+  [');', ''],
+  ['"""', ''],
+  ['', ''],
+  ['', ''],
+  ['def get_connection() -> sqlite3.Connection:', ''],
+  ['    conn = sqlite3.connect(DB_PATH)', ''],
+  ['    conn.row_factory = sqlite3.Row', ''],
+  ['    return conn', ''],
+  ['', ''],
+  ['', ''],
+  ['def init_db() -> None:', ''],
+  ['    with get_connection() as conn:', ''],
+  ['        conn.execute(CREATE_TABLE_SQL)', ''],
+  ['        conn.commit()', ''],
+  ['', ''],
+  ['', ''],
+  ['# ---------------------------------------------------------------------------', ''],
+  ['# Write', ''],
+  ['# ---------------------------------------------------------------------------', ''],
+  ['', ''],
+  ['def insert_report(', ''],
+  ['    disease_type: str,', ''],
+  ['    confidence: str,', ''],
+  ['    remedy: str,', ''],
+  ['    prevention: str,', ''],
+  ['    latitude: Optional[float] = None,', ''],
+  ['    longitude: Optional[float] = None,', ''],
+  [') -> int:', ''],
+  ['    timestamp = datetime.utcnow().isoformat()', ''],
+  ['    with get_connection() as conn:', ''],
+  ['        cur = conn.execute(', ''],
+  ['            """', ''],
+  ['            INSERT INTO disease_reports', ''],
+  ['                (disease_type, confidence, remedy, prevention, latitude, longitude, timestamp)', ''],
+  ['            VALUES (?, ?, ?, ?, ?, ?, ?)', ''],
+  ['            """,', ''],
+  ['            (disease_type, confidence, remedy, prevention, latitude, longitude, timestamp),', ''],
+  ['        )', ''],
+  ['        conn.commit()', ''],
+  ['        return cur.lastrowid', ''],
+  ['', ''],
+  ['', ''],
+  ['# ---------------------------------------------------------------------------', ''],
+  ['# Read', ''],
+  ['# ---------------------------------------------------------------------------', ''],
+  ['', ''],
+  ['def get_all_reports() -> list[dict]:', ''],
+  ['    with get_connection() as conn:', ''],
+  ['        rows = conn.execute(', ''],
+  ['            "SELECT * FROM disease_reports ORDER BY timestamp DESC"', ''],
+  ['        ).fetchall()', ''],
+  ['    return [dict(r) for r in rows]', ''],
+  ['', ''],
+  ['', ''],
+  ['def get_recent_reports_by_disease(disease_type: str, hours: int = 48) -> list[dict]:', ''],
+  ['    cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()', ''],
+  ['    with get_connection() as conn:', ''],
+  ['        rows = conn.execute(', ''],
+  ['            """', ''],
+  ['            SELECT * FROM disease_reports', ''],
+  ['            WHERE disease_type = ? AND timestamp >= ?', ''],
+  ['            ORDER BY timestamp DESC', ''],
+  ['            """,', ''],
+  ['            (disease_type, cutoff),', ''],
+  ['        ).fetchall()', ''],
+  ['    return [dict(r) for r in rows]', ''],
+  ['', ''],
+  ['', ''],
+  ['def get_outbreak_diseases(threshold: int = 3, hours: int = 48) -> list[dict]:', ''],
+  ['    """Global outbreak: diseases with >= threshold reports in window."""', ''],
+  ['    cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()', ''],
+  ['    with get_connection() as conn:', ''],
+  ['        rows = conn.execute(', ''],
+  ['            """', ''],
+  ['            SELECT disease_type, COUNT(*) as count', ''],
+  ['            FROM disease_reports', ''],
+  ['            WHERE timestamp >= ?', ''],
+  ['            GROUP BY disease_type', ''],
+  ['            HAVING count >= ?', ''],
+  ['            ORDER BY count DESC', ''],
+  ['            """,', ''],
+  ['            (cutoff, threshold),', ''],
+  ['        ).fetchall()', ''],
+  ['    return [dict(r) for r in rows]', ''],
+  ['', ''],
+  ['', ''],
+  ['# ---------------------------------------------------------------------------', ''],
+  ['# Geo-spatial helpers', ''],
+  ['# ---------------------------------------------------------------------------', ''],
+  ['', ''],
+  ['def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:', ''],
+  ['    """Return the great-circle distance in kilometres between two points."""', ''],
+  ['    R = 6371.0  # Earth radius in km', ''],
+  ['    phi1, phi2 = math.radians(lat1), math.radians(lat2)', ''],
+  ['    dphi = math.radians(lat2 - lat1)', ''],
+  ['    dlam = math.radians(lon2 - lon1)', ''],
+  ['    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2', ''],
+  ['    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))', ''],
+  ['', ''],
+  ['', ''],
+  ['def get_nearby_outbreak_risk(', ''],
+  ['    lat: float,', ''],
+  ['    lon: float,', ''],
+  ['    radius_km: float = 50,', ''],
+  ['    threshold: int = 3,', ''],
+  ['    hours: int = 48,', ''],
+  [') -> list[dict]:', ''],
+  ['    """', ''],
+  ['    Return diseases that have >= threshold reports within radius_km of (lat, lon)', ''],
+  ['    in the last hours window.', ''],
+  ['    Each entry: {disease_type, count}.', ''],
+  ['    """', ''],
+  ['    cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()', ''],
+  ['', ''],
+  ['    # Fetch candidate rows (with coordinates) inside the time window', ''],
+  ['    with get_connection() as conn:', ''],
+  ['        rows = conn.execute(', ''],
+  ['            """', ''],
+  ['            SELECT disease_type, latitude, longitude', ''],
+  ['            FROM disease_reports', ''],
+  ['            WHERE timestamp >= ?', ''],
+  ['              AND latitude IS NOT NULL', ''],
+  ['              AND longitude IS NOT NULL', ''],
+  ['            """,', ''],
+  ['            (cutoff,),', ''],
+  ['        ).fetchall()', ''],
+  ['', ''],
+  ['    # Count per disease, filtered by distance', ''],
+  ['    counts: dict[str, int] = {}', ''],
+  ['    for row in rows:', ''],
+  ['        dist = _haversine_km(lat, lon, row["latitude"], row["longitude"])', ''],
+  ['        if dist <= radius_km:', ''],
+  ['            counts[row["disease_type"]] = counts.get(row["disease_type"], 0) + 1', ''],
+  ['', ''],
+  ['    return [', ''],
+  ['        {"disease_type": disease, "count": count}', ''],
+  ['        for disease, count in sorted(counts.items(), key=lambda x: -x[1])', ''],
+  ['        if count >= threshold', ''],
+  ['    ]', ''],
+];
+
+// ── Per-line annotations (1-indexed; lines without entries show nothing) ──────
+const NOTES = {
+  1:  {tag:'tag-import', tl:'Module Docstring', body:'A triple-quoted string at the top of the file. Python treats it as documentation — not executed at runtime, just describes what this module does.'},
+  5:  {tag:'tag-import', tl:'import math', body:'Python\'s built-in <code>math</code> module. Used later for <code>math.radians</code>, <code>math.sin</code>, <code>math.cos</code>, <code>math.atan2</code>, <code>math.sqrt</code> — all needed for the Haversine distance formula.'},
+  6:  {tag:'tag-import', tl:'import sqlite3', body:'Python\'s built-in SQLite adapter. No external database server needed — SQLite stores everything in a single <code>.db</code> file on disk. Perfect for lightweight field-deployed apps like CropRadar.'},
+  7:  {tag:'tag-import', tl:'from datetime import datetime, timedelta', body:'<code>datetime.utcnow()</code> — generates the current time in UTC (timezone-safe).<br><code>timedelta(hours=N)</code> — used to compute a "cutoff" time N hours ago for filtering recent events.'},
+  8:  {tag:'tag-import', tl:'from typing import Optional', body:'Allows <code>Optional[float]</code> type hints, meaning a parameter can be either a <code>float</code> or <code>None</code>. Used for <code>latitude</code> and <code>longitude</code> since GPS is not always available.'},
+  10: {tag:'tag-config', tl:'DB_PATH = "cropradar.db"', body:'A module-level constant. The SQLite database will be created as <code>cropradar.db</code> in the same directory the app runs from. Centralising the path here means you only need to change it in one place.'},
+  16: {tag:'tag-schema', tl:'CREATE_TABLE_SQL (the schema)', body:'A multi-line SQL string stored as a Python constant. It defines the single table used by the entire application: <code>disease_reports</code>. The <code>IF NOT EXISTS</code> clause makes it safe to run every startup without error.'},
+  17: {tag:'tag-schema', tl:'CREATE TABLE IF NOT EXISTS disease_reports', body:'Creates the table only if it doesn\'t already exist. This means <code>init_db()</code> is idempotent — you can call it every time the app starts without losing data.'},
+  18: {tag:'tag-schema', tl:'id — INTEGER PRIMARY KEY AUTOINCREMENT', body:'<b>Primary key.</b> SQLite automatically assigns a unique, incrementing integer to every new row. You never have to supply an ID when inserting — the database generates it for you. <code>lastrowid</code> retrieves it after insert.'},
+  19: {tag:'tag-schema', tl:'disease_type — TEXT NOT NULL', body:'The name of the detected plant disease (e.g. "Rice Blast", "Leaf Blight"). Marked <code>NOT NULL</code> because every report must have a disease — it\'s the core data point.'},
+  20: {tag:'tag-schema', tl:'confidence — TEXT (nullable)', body:'The AI model\'s confidence score stored as text (e.g. "87.4%"). Nullable because early versions of the AI may not provide a confidence value, and we don\'t want inserts to fail in that case.'},
+  21: {tag:'tag-schema', tl:'remedy — TEXT (nullable)', body:'Free-text treatment advice (e.g. "Apply fungicide X"). Nullable — if the AI or knowledge base has no remedy suggestion, the field is simply NULL rather than causing an error.'},
+  22: {tag:'tag-schema', tl:'prevention — TEXT (nullable)', body:'Free-text prevention guidance (e.g. "Rotate crops"). Nullable for the same reason as remedy — the system degrades gracefully when this info is unavailable.'},
+  23: {tag:'tag-schema', tl:'latitude — REAL (nullable)', body:'GPS latitude as a floating-point decimal degree (e.g. <code>28.6139</code>). Nullable because farmers may decline to share their location or the device has no GPS.'},
+  24: {tag:'tag-schema', tl:'longitude — REAL (nullable)', body:'GPS longitude (e.g. <code>77.2090</code>). Together with latitude, this enables the geo-spatial outbreak detection. When both are NULL, the row is excluded from geo-queries automatically.'},
+  25: {tag:'tag-schema', tl:'timestamp — TEXT NOT NULL', body:'ISO 8601 UTC datetime string (e.g. <code>2026-03-30T10:22:00</code>). Stored as TEXT because SQLite has no native datetime type. All time comparisons work via string comparison since ISO format is lexicographically sortable. <code>NOT NULL</code> — every report must be timestamped.'},
+  30: {tag:'tag-fn', tl:'get_connection() → sqlite3.Connection', body:'Opens a connection to the SQLite database file. Returns it to the caller for use inside a <code>with</code> block (context manager). Setting <code>row_factory = sqlite3.Row</code> is the key line: it lets you access columns by name (<code>row["timestamp"]</code>) rather than position (<code>row[6]</code>).'},
+  31: {tag:'tag-fn', tl:'sqlite3.connect(DB_PATH)', body:'If <code>cropradar.db</code> does not exist yet, SQLite creates the file automatically. If it does exist, it simply opens it. Zero configuration required compared to PostgreSQL or MySQL.'},
+  32: {tag:'tag-fn', tl:'conn.row_factory = sqlite3.Row', body:'This single line changes how query results look. Without it: <code>row[0]</code>, <code>row[1]</code>… With it: <code>row["id"]</code>, <code>row["disease_type"]</code>. Makes downstream code much more readable and prevents bugs when column order changes.'},
+  36: {tag:'tag-fn', tl:'init_db() → None', body:'Called once at application startup (usually from <code>app.py</code> or <code>main.py</code>). It ensures the database table exists before any other function tries to use it. Safe to call repeatedly — <code>CREATE TABLE IF NOT EXISTS</code> is a no-op if the table already exists.'},
+  37: {tag:'tag-fn', tl:'with get_connection() as conn:', body:'The <code>with</code> statement creates a context manager. It guarantees that even if an exception is raised, the connection is properly closed and the transaction is either committed or rolled back. This is the safe way to work with databases.'},
+  46: {tag:'tag-fn', tl:'insert_report() — Write a new disease report', body:'The only write function in the module. Takes all report fields. <code>latitude</code> and <code>longitude</code> default to <code>None</code> (optional). Generates the timestamp internally so callers don\'t have to worry about it. Returns the new row\'s <code>id</code>.'},
+  54: {tag:'tag-sql', tl:'timestamp = datetime.utcnow().isoformat()', body:'Generates the current UTC time as an ISO 8601 string like <code>"2026-03-30T10:22:00.123456"</code>. Using UTC (not local time) ensures consistency if the app runs across different time zones or servers.'},
+  56: {tag:'tag-sql', tl:'Parameterised INSERT with ?', body:'Never build SQL by string concatenation! The <code>?</code> placeholders are filled in by the SQLite driver safely. This prevents SQL injection attacks where a malicious disease name could otherwise corrupt or delete the database.'},
+  65: {tag:'tag-fn', tl:'return cur.lastrowid', body:'After an insert, <code>cur.lastrowid</code> gives the auto-generated <code>id</code> of the newly created row. The caller (e.g. the API endpoint) gets back this ID immediately so it can reference the report in a response.'},
+  72: {tag:'tag-fn', tl:'get_all_reports() → list[dict]', body:'Fetches every row from <code>disease_reports</code>, sorted newest-first (<code>ORDER BY timestamp DESC</code>). Converts each <code>sqlite3.Row</code> object to a plain Python <code>dict</code> using <code>dict(r)</code> so the result is JSON-serialisable.'},
+  77: {tag:'tag-fn', tl:'return [dict(r) for r in rows]', body:'A list comprehension that converts each <code>sqlite3.Row</code> to a regular Python dictionary. This is necessary because <code>sqlite3.Row</code> objects cannot be directly converted to JSON by frameworks like Flask or FastAPI.'},
+  80: {tag:'tag-fn', tl:'get_recent_reports_by_disease()', body:'Filters by both <code>disease_type</code> AND a time window. The <code>cutoff</code> is: now minus N hours. Because timestamp is stored in ISO format (lexicographically sortable), the SQL <code>timestamp >= ?</code> comparison works correctly as a string comparison.'},
+  81: {tag:'tag-sql', tl:'cutoff = timedelta calculation', body:'<code>datetime.utcnow() - timedelta(hours=48)</code> gives the datetime 48 hours ago. Converting it to <code>isoformat()</code> produces a string that can be directly compared against the <code>timestamp</code> column in SQL.'},
+  94: {tag:'tag-fn', tl:'get_outbreak_diseases() — Global outbreak detector', body:'Uses SQL aggregation: <code>GROUP BY disease_type</code> groups all reports per disease, <code>COUNT(*)</code> counts them, <code>HAVING count >= ?</code> filters to only diseases that cross the threshold. Returns a ranked list like <code>[{"disease_type": "Leaf Blight", "count": 7}, ...]</code>.'},
+  116: {tag:'tag-geo', tl:'_haversine_km() — Distance between GPS points', body:'The underscore prefix marks this as a private/internal helper (convention in Python). It implements the <b>Haversine formula</b>: converts latitude/longitude in degrees to radians, applies spherical trigonometry, and returns distance in km. Earth radius = 6371 km.'},
+  118: {tag:'tag-geo', tl:'R = 6371.0  # Earth radius in km', body:'The mean radius of Earth in kilometres. This is the standard value used in the Haversine formula. It gives accurate results for distances up to a few hundred km — perfect for agricultural outbreak radius checks.'},
+  122: {tag:'tag-geo', tl:'Haversine formula — the math', body:'<code>a = sin²(Δφ/2) + cos(φ₁)·cos(φ₂)·sin²(Δλ/2)</code><br>Then: <code>d = R · 2 · atan2(√a, √(1−a))</code><br>This accounts for the Earth\'s curvature. A simpler flat-earth calculation would give wrong results over large distances.'},
+  126: {tag:'tag-geo', tl:'get_nearby_outbreak_risk() — Geo-aware outbreak detection', body:'The most complex function. It: <br>1. Fetches all geo-tagged reports within the time window<br>2. Loops over them, computing Haversine distance for each<br>3. Counts only those within <code>radius_km</code><br>4. Returns diseases where the count meets the threshold'},
+  138: {tag:'tag-geo', tl:'cutoff for time-windowed geo query', body:'Same time-window pattern as other read functions. Combined with <code>latitude IS NOT NULL AND longitude IS NOT NULL</code>, this fetches only recent, geo-tagged reports — skipping rows without coordinates before the expensive distance loop.'},
+  154: {tag:'tag-geo', tl:'counts: dict[str, int] = {}', body:'A counter dictionary for accumulating how many reports of each disease fall within the radius. Unlike SQL <code>COUNT()</code>, this counting happens in Python because SQLite cannot compute Haversine distance natively.'},
+  156: {tag:'tag-geo', tl:'dist = _haversine_km(...)', body:'For each candidate row, calculates the km distance from the farmer\'s location to where the report originated. If within <code>radius_km</code>, increments the counter for that disease.'},
+  160: {tag:'tag-geo', tl:'Return filtered, sorted results', body:'After counting, filters to entries that meet the threshold, then sorts descending by count. Returns a clean list of dicts: <code>[{"disease_type": "Rust", "count": 5}, ...]</code> — ready for the API to serve as a JSON alert.'},
+};
+
+// ── Group ranges for sidebar clicks ──────────────────────────────────────────
+const GROUPS = {
+  imports: [1, 10],
+  schema:  [12, 39],
+  write:   [42, 65],
+  read:    [68, 109],
+  geo:     [112, 165],
+};
+
+// ── Build code view ───────────────────────────────────────────────────────────
+const container = document.getElementById('codeview');
+RAW.forEach(([code], idx) => {
+  const ln = idx + 1;
+  const div = document.createElement('div');
+  div.className = 'code-line' + (NOTES[ln] ? ' has-note' : '');
+  div.dataset.line = ln;
+  if ([12,42,68,112].includes(ln)) div.classList.add('section-start');
+
+  const numSpan  = document.createElement('span');
+  numSpan.className = 'line-num';
+  numSpan.textContent = ln;
+
+  const codeSpan = document.createElement('span');
+  codeSpan.className = 'line-code';
+  codeSpan.innerHTML = highlight(code);
+
+  div.appendChild(numSpan);
+  div.appendChild(codeSpan);
+  div.addEventListener('click', () => showNote(ln, div));
+  container.appendChild(div);
+});
+
+function highlight(code) {
+  if (!code.trim()) return '&nbsp;';
+  let s = code
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  // comments
+  s = s.replace(/(#.*)$/, '<span class="cmt">$1</span>');
+  // strings
+  s = s.replace(/("""|\"\"|\'\'\'|"[^"]*"|'[^']*')/g, '<span class="str">$1</span>');
+  // keywords
+  ['import','from','def','return','with','for','if','as','not','in','and','or','None','True','False','IS'].forEach(k => {
+    s = s.replace(new RegExp('\\b'+k+'\\b','g'), `<span class="kw">${k}</span>`);
+  });
+  // numbers
+  s = s.replace(/\b(\d+\.?\d*)\b/g, '<span class="num">$1</span>');
+  return s;
+}
+
+let activeEl = null;
+function showNote(ln, el) {
+  if (activeEl) activeEl.classList.remove('active');
+  el.classList.add('active');
+  activeEl = el;
+
+  const box   = document.getElementById('ann-box');
+  const note  = NOTES[ln];
+  if (!note) {
+    box.classList.remove('visible');
+    return;
+  }
+  document.getElementById('ann-tag').className   = 'ann-tag ' + note.tag;
+  document.getElementById('ann-tag').textContent = note.tag.replace('tag-','');
+  document.getElementById('ann-title').textContent = note.tl;
+  document.getElementById('ann-body').innerHTML  = note.body;
+  box.classList.add('visible');
+}
+
+function highlightGroup(name) {
+  const [start, end] = GROUPS[name];
+  document.querySelectorAll('.code-line').forEach(el => {
+    const ln = +el.dataset.line;
+    el.classList.toggle('active', ln >= start && ln <= end);
+  });
+  // Switch to code panel
+  showPanel('code');
+  // Scroll first line into view
+  const first = document.querySelector(`.code-line[data-line="${start}"]`);
+  if (first) first.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function showPanel(name) {
+  ['code','schema','functions','flow'].forEach(p => {
+    document.getElementById('panel-'+p).style.display = p === name ? 'block' : 'none';
+  });
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    t.classList.toggle('active', ['code','schema','functions','flow'][i] === name);
+  });
+}
+</script>
+</body>
+</html>

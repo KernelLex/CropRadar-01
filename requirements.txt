@@ -8,6 +8,9 @@ python-multipart>=0.0.9      # required for FastAPI file uploads
 # --- Telegram bot ---
 python-telegram-bot>=21.0
 
+# --- WhatsApp bot (Meta Cloud API) ---
+flask>=3.0.0
+
 # --- Vision AI ---
 google-generativeai>=0.5.0   # Gemini Vision (primary)
 openai>=1.20.0                # GPT-4o Vision (alternative)

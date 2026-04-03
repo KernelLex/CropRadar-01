@@ -147,7 +147,7 @@ def get_nearby_outbreak_risk(
               AND latitude IS NOT NULL
               AND longitude IS NOT NULL
             """,
-            (cutoff,),
+            (cutoff,)
         ).fetchall()
 
     # Count per disease, filtered by distance

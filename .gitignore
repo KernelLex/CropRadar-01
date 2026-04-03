@@ -36,3 +36,9 @@ Thumbs.db
 
 # Streamlit
 .streamlit/
+
+# Flutter generated build output (source files in cropradar_app/ are tracked)
+cropradar_app_build/
+
+# Claude Code internals
+.claude/
