@@ -227,7 +227,21 @@ def _do_location(sender: str, session: dict, lat: float, lon: float) -> None:
     # Step 1 — immediate confirmation
     send_message(sender, s(lang, "location_received", lat=lat, lon=lon))
 
-    # Step 2 — query outbreak API
+    # Step 2 — predictive risk report (weather + NDVI + disease history)
+    try:
+        risk_resp = requests.get(
+            f"{API_URL}/risk-report",
+            params={"lat": lat, "lon": lon, "language": lang},
+            timeout=15,
+        )
+        if risk_resp.ok:
+            report_text = risk_resp.json().get("report_text", "")
+            if report_text:
+                send_message(sender, report_text)
+    except Exception as exc:
+        print(f"[_do_location risk-report error] {exc}")
+
+    # Step 3 — query outbreak API (confirmed recent cases)
     try:
         resp = requests.get(
             f"{API_URL}/nearby-alerts",
@@ -238,7 +252,7 @@ def _do_location(sender: str, session: dict, lat: float, lon: float) -> None:
     except Exception:
         outbreaks = []
 
-    # Step 3 — send structured result
+    # Step 4 — send structured outbreak result
     if outbreaks:
         lines = [s(lang, "outbreak_header")]
         for ob in outbreaks:

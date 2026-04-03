@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS disease_reports (
     prevention    TEXT,
     latitude      REAL,
     longitude     REAL,
+    photo_path    TEXT,
     timestamp     TEXT    NOT NULL
 );
 """
@@ -118,6 +119,11 @@ def init_db() -> None:
         conn.execute(CREATE_WEATHER_SNAPSHOTS_SQL)
         conn.execute(CREATE_NDVI_SNAPSHOTS_SQL)
         conn.execute(CREATE_RISK_SCORES_SQL)
+        # Migrate: add photo_path to existing databases that predate this column
+        try:
+            conn.execute("ALTER TABLE disease_reports ADD COLUMN photo_path TEXT")
+        except Exception:
+            pass  # column already exists
         conn.commit()
 
 
@@ -133,19 +139,32 @@ def insert_report(
     prevention: str,
     latitude: Optional[float] = None,
     longitude: Optional[float] = None,
+    photo_path: Optional[str] = None,
 ) -> int:
     timestamp = datetime.utcnow().isoformat()
     with get_connection() as conn:
         cur = conn.execute(
             """
             INSERT INTO disease_reports
-                (disease_type, confidence, remedy, prevention, latitude, longitude, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (disease_type, confidence, remedy, prevention,
+                 latitude, longitude, photo_path, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (disease_type, confidence, remedy, prevention, latitude, longitude, timestamp),
+            (disease_type, confidence, remedy, prevention,
+             latitude, longitude, photo_path, timestamp),
         )
         conn.commit()
         return cur.lastrowid
+
+
+def update_report_photo(report_id: int, photo_path: str) -> None:
+    """Store the persisted photo file path for a report."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE disease_reports SET photo_path = ? WHERE id = ?",
+            (photo_path, report_id),
+        )
+        conn.commit()
 
 
 # ---------------------------------------------------------------------------

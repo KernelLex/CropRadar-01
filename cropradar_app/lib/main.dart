@@ -76,9 +76,9 @@ class _ShellState extends State<_Shell> {
             label: isKn ? 'ಸ್ಕ್ಯಾನ್' : 'Scan',
           ),
           NavigationDestination(
-            icon: const Icon(Icons.history_outlined),
-            selectedIcon: Icon(Icons.history, color: cs.primary),
-            label: isKn ? 'ಇತಿಹಾಸ' : 'History',
+            icon: const Icon(Icons.bar_chart_outlined),
+            selectedIcon: Icon(Icons.bar_chart, color: cs.primary),
+            label: isKn ? 'ಅಂಕಿ ಅಂಶ' : 'Stats',
           ),
         ],
       ),

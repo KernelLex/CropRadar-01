@@ -17,12 +17,17 @@ from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import database
 import notifier
 import vision_diagnosis
 import audio_transcription
+
+# Directory where uploaded crop photos are persisted
+PHOTOS_DIR = Path("photos")
+PHOTOS_DIR.mkdir(exist_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -45,6 +50,9 @@ app.add_middleware(
 # Ensure the DB and schema exist at startup
 database.init_db()
 
+# Serve persisted crop photos as static files: GET /photos/{filename}
+app.mount("/photos", StaticFiles(directory=str(PHOTOS_DIR)), name="photos")
+
 
 # ---------------------------------------------------------------------------
 # Schemas
@@ -57,6 +65,7 @@ class DiagnosisResponse(BaseModel):
     prevention: str
     outbreak_alert: Optional[str] = None
     report_id: Optional[int] = None
+    photo_url: Optional[str] = None
 
 
 class ReportRequest(BaseModel):
@@ -181,26 +190,33 @@ async def analyze_image(
             result = vision_diagnosis.analyze_crop_image(tmp_path, language=language)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Vision AI error: {exc}") from exc
+
+        disease_name = result.get("disease_name", "Unknown")
+        confidence   = result.get("confidence", "Unknown")
+        remedy       = result.get("remedy", "")
+        prevention   = result.get("prevention", "")
+
+        # ---- Persist report -----------------------------------------------
+        report_id = database.insert_report(
+            disease_type=disease_name,
+            confidence=confidence,
+            remedy=remedy,
+            prevention=prevention,
+            latitude=latitude,
+            longitude=longitude,
+        )
+
+        # ---- Save photo permanently ---------------------------------------
+        photo_filename = f"{report_id}.jpg"
+        photo_path = PHOTOS_DIR / photo_filename
+        shutil.copy2(tmp_path, photo_path)
+        database.update_report_photo(report_id, str(photo_path))
+
     finally:
         try:
-            os.unlink(tmp_path)  # always clean up
+            os.unlink(tmp_path)  # always clean up temp
         except OSError:
             pass
-
-    disease_name = result.get("disease_name", "Unknown")
-    confidence   = result.get("confidence", "Unknown")
-    remedy       = result.get("remedy", "")
-    prevention   = result.get("prevention", "")
-
-    # ---- Persist report ---------------------------------------------------
-    report_id = database.insert_report(
-        disease_type=disease_name,
-        confidence=confidence,
-        remedy=remedy,
-        prevention=prevention,
-        latitude=latitude,
-        longitude=longitude,
-    )
 
     # ---- Outbreak check ---------------------------------------------------
     outbreak_alert = _check_outbreak(disease_name)
@@ -219,6 +235,7 @@ async def analyze_image(
         prevention=prevention,
         outbreak_alert=outbreak_alert,
         report_id=report_id,
+        photo_url=f"/photos/{photo_filename}",
     )
 
 
