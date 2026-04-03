@@ -12,6 +12,8 @@ dependencies:
   http: ^1.2.0          # HTTP client for FastAPI backend
   image_picker: ^1.0.7  # Camera + gallery image selection
   geolocator: ^11.0.0   # GPS location (handles its own permissions)
+  flutter_map: ^7.0.1   # OpenStreetMap tiles + circle/marker layers
+  latlong2: ^0.9.0      # LatLng coordinate type for flutter_map
 
 dev_dependencies:
   flutter_test:

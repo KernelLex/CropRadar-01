@@ -14,10 +14,8 @@ class LocationService {
     if (permission == LocationPermission.deniedForever) return null;
 
     return Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        timeLimit: Duration(seconds: 15),
-      ),
+      desiredAccuracy: LocationAccuracy.high,
+      timeLimit: const Duration(seconds: 15),,
     );
   }
 }
