@@ -20,6 +20,9 @@ from pathlib import Path
 
 import database as database
 import requests
+import risk_features
+import risk_model
+import risk_report
 from telegram import (
     KeyboardButton,
     ReplyKeyboardMarkup,
@@ -89,6 +92,7 @@ STRINGS = {
         "prevention_label": "🛡️ *Prevention:*",
         "report_stored": "📋 _Report #{id} stored{loc}_",
         "next_photo": "\n📸 Send another photo to analyse more crops, or /restart to reset.",
+        "risk_analysing": "📊 Analysing crop risk for your area…",
         "conn_error": "❌ Could not connect to the CropRadar backend.\nMake sure the API is running at: {url}",
         "analysis_error": "❌ Analysis failed: {err}",
         "nudge_location": "⚠️ I need your *location* first — please tap the 📍 button below.",
@@ -123,6 +127,7 @@ STRINGS = {
         "prevention_label": "🛡️ *ತಡೆಗಟ್ಟುವಿಕೆ:*",
         "report_stored": "📋 _ವರದಿ #{id} ಸಂಗ್ರಹಿಸಲಾಗಿದೆ{loc}_",
         "next_photo": "\n📸 ಇನ್ನೊಂದು ಫೋಟೋ ಕಳುಹಿಸಿ ಅಥವಾ /restart ಮಾಡಿ.",
+        "risk_analysing": "📊 ನಿಮ್ಮ ಪ್ರದೇಶದ ಬೆಳೆ ಅಪಾಯ ವಿಶ್ಲೇಷಿಸಲಾಗುತ್ತಿದೆ…",
         "conn_error": "❌ CropRadar ಬ್ಯಾಕೆಂಡ್‌ಗೆ ಸಂಪರ್ಕಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.\n{url} ನಲ್ಲಿ API ಚಾಲನೆಯಲ್ಲಿದೆಯೇ ಎಂದು ಖಚಿತಪಡಿಸಿ.",
         "analysis_error": "❌ ವಿಶ್ಲೇಷಣೆ ವಿಫಲವಾಗಿದೆ: {err}",
         "nudge_location": "⚠️ ಮೊದಲು ನಿಮ್ಮ *ಸ್ಥಳ* ಬೇಕು — ದಯವಿಟ್ಟು ಕೆಳಗಿನ 📍 ಬಟನ್ ಅನ್ನು ಟ್ಯಾಪ್ ಮಾಡಿ.",
@@ -252,6 +257,17 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         reply_markup=ReplyKeyboardRemove(),
     )
 
+    # --- Predictive area-risk analysis (NEW) ---
+    try:
+        await msg.reply_text(s(context, "risk_analysing"))
+        features = risk_features.build_risk_features(lat, lon)
+        risk_result = risk_model.score_area_risk(features)
+        report_msg = risk_report.build_crop_risk_report(lang, risk_result)
+        await msg.reply_text(report_msg, parse_mode="Markdown")
+    except Exception as exc:
+        logger.warning("Predictive risk analysis failed: %s", exc)
+
+    # --- Existing outbreak check (UNCHANGED) ---
     outbreaks = _check_nearby_outbreaks(lat, lon)
 
     if outbreaks:

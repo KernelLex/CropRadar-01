@@ -285,3 +285,55 @@ def get_nearby_alerts(
     alert_message = OUTBREAK_TEMPLATE if outbreaks else None
     return NearbyAlertsResponse(outbreaks=outbreaks, alert_message=alert_message)
 
+
+# ---------------------------------------------------------------------------
+# Predictive risk routes (NEW)
+# ---------------------------------------------------------------------------
+
+import risk_features
+import risk_model
+import risk_report as risk_report_module
+
+
+class RiskAnalysisResponse(BaseModel):
+    risk_score: float
+    risk_level: str
+    likely_crops_at_risk: list[str]
+    likely_diseases: list[str]
+    reasons: list[str]
+    recommendations: list[str]
+    score_breakdown: dict
+
+
+@app.get("/risk-nearby", response_model=RiskAnalysisResponse, tags=["risk"])
+def get_risk_nearby(lat: float, lon: float):
+    """
+    Run predictive risk analysis for a given location.
+    Returns structured risk assessment (for testing/dashboard).
+    """
+    features = risk_features.build_risk_features(lat, lon)
+    result = risk_model.score_area_risk(features)
+    return RiskAnalysisResponse(
+        risk_score=result["risk_score"],
+        risk_level=result["risk_level"],
+        likely_crops_at_risk=result["likely_crops_at_risk"],
+        likely_diseases=result["likely_diseases"],
+        reasons=result["reasons"],
+        recommendations=result["recommendations"],
+        score_breakdown=result["score_breakdown"],
+    )
+
+
+@app.get("/risk-report", tags=["risk"])
+def get_risk_report(lat: float, lon: float, language: str = "en"):
+    """
+    Run predictive risk analysis and return formatted Telegram report text.
+    """
+    features = risk_features.build_risk_features(lat, lon)
+    result = risk_model.score_area_risk(features)
+    report_text = risk_report_module.build_crop_risk_report(language, result)
+    return {
+        "risk_level": result["risk_level"],
+        "risk_score": result["risk_score"],
+        "report_text": report_text,
+    }
