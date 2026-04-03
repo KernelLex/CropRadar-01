@@ -28,7 +28,7 @@ The bot instantly returns an AI-powered diagnosis with a remedy and prevention t
 
 - 📸 **Crop image diagnosis** using Google Gemini Vision API
 - 💊 **Remedy & prevention recommendations** tailored to the detected disease
-- ⚠️ **Outbreak detection** — triggered when ≥ 3 nearby reports match the same disease
+- ⚠️ **Outbreak detection & Alerts** — triggered when ≥ 3 nearby reports match the same disease, proactively broadcasting a bilingual warning to nearby farmers via Telegram.
 - 🗺️ **Regional outbreak map** — interactive Streamlit + Folium dashboard with clustered markers
 - 🌐 **Bilingual interface** — full English and Kannada (ಕನ್ನಡ) support, including AI responses in Kannada
 - 📍 **GPS-linked reports** — every diagnosis is geo-tagged via native Telegram location sharing
@@ -110,6 +110,7 @@ cropradar/
 ├── api.py               FastAPI backend (analyze-image, alerts, reports)
 ├── bot.py               Telegram bot (bilingual ConversationHandler)
 ├── database.py          SQLite + Haversine geo-outbreak detection
+├── notifier.py          Proactive bilingual Telegram alert broadcaster
 ├── vision_diagnosis.py  Gemini Vision integration with language-aware prompts
 ├── map_dashboard.py     Streamlit + Folium outbreak map dashboard
 ├── requirements.txt     Python dependencies

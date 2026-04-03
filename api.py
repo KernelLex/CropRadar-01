@@ -8,8 +8,10 @@ Endpoints:
 """
 
 import os
+import logging
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -18,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import database
+import notifier
 import vision_diagnosis
 
 # ---------------------------------------------------------------------------
@@ -95,6 +98,49 @@ def _check_outbreak(disease_name: str) -> Optional[str]:
     return None
 
 
+logger = logging.getLogger(__name__)
+
+
+def _maybe_broadcast_outbreak(
+    disease_type: str,
+    lat: Optional[float],
+    lon: Optional[float],
+) -> None:
+    """Check outbreak threshold and send proactive alerts if warranted."""
+    if lat is None or lon is None:
+        return
+
+    # Check localised outbreak around the new report's coordinates
+    outbreaks = database.get_nearby_outbreak_risk(
+        lat, lon,
+        radius_km=50,
+        threshold=OUTBREAK_THRESHOLD,
+        hours=OUTBREAK_WINDOW_HRS,
+    )
+
+    # Find the entry for this specific disease
+    match = next((o for o in outbreaks if o["disease_type"] == disease_type), None)
+    if match is None:
+        return
+
+    # Dedup: skip if a similar alert was sent recently
+    if database.was_outbreak_notified_recently(disease_type, lat, lon):
+        logger.info(
+            "Outbreak broadcast skipped (already notified): %s @ (%.4f, %.4f)",
+            disease_type, lat, lon,
+        )
+        return
+
+    # Find eligible users and send alerts
+    users = database.get_nearby_users(lat, lon, radius_km=50)
+    if not users:
+        logger.info("Outbreak detected but no nearby users to notify.")
+        return
+
+    database.record_outbreak_notification(disease_type, lat, lon)
+    notifier.broadcast_outbreak_alert(disease_type, match["count"], users)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -153,6 +199,13 @@ async def analyze_image(
     # ---- Outbreak check ---------------------------------------------------
     outbreak_alert = _check_outbreak(disease_name)
 
+    # ---- Proactive broadcast (background) ---------------------------------
+    threading.Thread(
+        target=_maybe_broadcast_outbreak,
+        args=(disease_name, latitude, longitude),
+        daemon=True,
+    ).start()
+
     return DiagnosisResponse(
         disease_name=disease_name,
         confidence=confidence,
@@ -176,6 +229,14 @@ def add_report(body: ReportRequest):
         latitude=body.latitude,
         longitude=body.longitude,
     )
+
+    # Proactive broadcast (background)
+    threading.Thread(
+        target=_maybe_broadcast_outbreak,
+        args=(body.disease_type, body.latitude, body.longitude),
+        daemon=True,
+    ).start()
+
     return ReportResponse(report_id=report_id, message="Report stored successfully.")
 
 

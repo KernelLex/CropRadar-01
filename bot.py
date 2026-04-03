@@ -18,6 +18,7 @@ import os
 import tempfile
 from pathlib import Path
 
+import database as database
 import requests
 from telegram import (
     KeyboardButton,
@@ -225,13 +226,25 @@ async def wrong_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ---------------------------------------------------------------------------
 
 async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Store location and check for nearby outbreaks."""
+    """Store location, persist user for broadcasts, and check for nearby outbreaks."""
     msg = update.message
     lat = msg.location.latitude
     lon = msg.location.longitude
     context.user_data["lat"] = lat
     context.user_data["lon"] = lon
     lang = context.user_data.get("lang", "en")
+
+    # Persist / update user for proactive outbreak broadcasts
+    try:
+        database.upsert_bot_user(
+            chat_id=update.effective_chat.id,
+            telegram_user_id=update.effective_user.id,
+            language=lang,
+            latitude=lat,
+            longitude=lon,
+        )
+    except Exception as exc:
+        logger.warning("Failed to persist bot user: %s", exc)
 
     await msg.reply_text(
         s(context, "location_received").format(lat=lat, lon=lon),

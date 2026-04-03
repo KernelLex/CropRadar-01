@@ -26,6 +26,30 @@ CREATE TABLE IF NOT EXISTS disease_reports (
 );
 """
 
+CREATE_BOT_USERS_SQL = """
+CREATE TABLE IF NOT EXISTS bot_users (
+    chat_id           INTEGER PRIMARY KEY,
+    telegram_user_id  INTEGER,
+    language          TEXT    DEFAULT 'en',
+    latitude          REAL,
+    longitude         REAL,
+    is_active         INTEGER DEFAULT 1,
+    created_at        TEXT    NOT NULL,
+    last_seen         TEXT    NOT NULL
+);
+"""
+
+CREATE_OUTBREAK_NOTIFICATIONS_SQL = """
+CREATE TABLE IF NOT EXISTS outbreak_notifications (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    disease_type     TEXT    NOT NULL,
+    center_latitude  REAL    NOT NULL,
+    center_longitude REAL    NOT NULL,
+    radius_km        REAL    DEFAULT 50,
+    triggered_at     TEXT    NOT NULL
+);
+"""
+
 
 def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
@@ -36,7 +60,10 @@ def get_connection() -> sqlite3.Connection:
 def init_db() -> None:
     with get_connection() as conn:
         conn.execute(CREATE_TABLE_SQL)
+        conn.execute(CREATE_BOT_USERS_SQL)
+        conn.execute(CREATE_OUTBREAK_NOTIFICATIONS_SQL)
         conn.commit()
+
 
 
 # ---------------------------------------------------------------------------
@@ -162,3 +189,108 @@ def get_nearby_outbreak_risk(
         for disease, count in sorted(counts.items(), key=lambda x: -x[1])
         if count >= threshold
     ]
+
+
+# ---------------------------------------------------------------------------
+# Bot-user persistence
+# ---------------------------------------------------------------------------
+
+def upsert_bot_user(
+    chat_id: int,
+    telegram_user_id: int,
+    language: str,
+    latitude: float,
+    longitude: float,
+) -> None:
+    """Insert or update a Telegram bot user record."""
+    now = datetime.utcnow().isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO bot_users
+                (chat_id, telegram_user_id, language, latitude, longitude,
+                 is_active, created_at, last_seen)
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+            ON CONFLICT(chat_id) DO UPDATE SET
+                telegram_user_id = excluded.telegram_user_id,
+                language         = excluded.language,
+                latitude         = excluded.latitude,
+                longitude        = excluded.longitude,
+                is_active        = 1,
+                last_seen        = excluded.last_seen
+            """,
+            (chat_id, telegram_user_id, language, latitude, longitude, now, now),
+        )
+        conn.commit()
+
+
+def get_nearby_users(
+    lat: float, lon: float, radius_km: float = 50
+) -> list[dict]:
+    """Return active bot users whose saved location is within radius_km."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT chat_id, telegram_user_id, language, latitude, longitude
+            FROM bot_users
+            WHERE is_active = 1
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            """
+        ).fetchall()
+
+    return [
+        dict(r) for r in rows
+        if _haversine_km(lat, lon, r["latitude"], r["longitude"]) <= radius_km
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Outbreak notification dedup
+# ---------------------------------------------------------------------------
+
+def was_outbreak_notified_recently(
+    disease_type: str,
+    lat: float,
+    lon: float,
+    radius_km: float = 20,
+    hours: int = 24,
+) -> bool:
+    """Check if a similar outbreak alert was already sent recently."""
+    cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT center_latitude, center_longitude
+            FROM outbreak_notifications
+            WHERE disease_type = ? AND triggered_at >= ?
+            """,
+            (disease_type, cutoff),
+        ).fetchall()
+
+    for row in rows:
+        if _haversine_km(lat, lon, row["center_latitude"], row["center_longitude"]) <= radius_km:
+            return True
+    return False
+
+
+def record_outbreak_notification(
+    disease_type: str,
+    lat: float,
+    lon: float,
+    radius_km: float = 50,
+) -> int:
+    """Log a sent outbreak notification for dedup purposes."""
+    now = datetime.utcnow().isoformat()
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO outbreak_notifications
+                (disease_type, center_latitude, center_longitude, radius_km, triggered_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (disease_type, lat, lon, radius_km, now),
+        )
+        conn.commit()
+        return cur.lastrowid
+
