@@ -126,18 +126,35 @@ if ($cloudflared) {
 }
 
 # ── Summary ───────────────────────────────────────────────────────────────────
+$divider = "  " + ("─" * 57)
+
 Write-Host ""
-Write-Host "  ─────────────────────────────────────────────────────" -ForegroundColor DarkGray
-Write-Host "  Service               URL" -ForegroundColor DarkGray
-Write-Host "  ─────────────────────────────────────────────────────" -ForegroundColor DarkGray
-Write-Host "  FastAPI backend     → http://localhost:8000/docs"
-Write-Host "  Admin dashboard     → http://localhost:8501"
-Write-Host "  WhatsApp webhook    → (tunnel URL above)/whatsapp"
-Write-Host "  Telegram bot        → polling (no URL needed)"
-Write-Host "  ─────────────────────────────────────────────────────" -ForegroundColor DarkGray
+Write-Host $divider -ForegroundColor DarkCyan
+Write-Host "  🌾  CropRadar — All Services Running" -ForegroundColor Cyan
+Write-Host $divider -ForegroundColor DarkCyan
 Write-Host ""
-Write-Host "  Press Ctrl+C here to stop the tunnel." -ForegroundColor DarkGray
+Write-Host "  🔧  FastAPI backend" -ForegroundColor White
+Write-Host "      http://localhost:8000"       -ForegroundColor Green
+Write-Host "      http://localhost:8000/docs   ← interactive API docs" -ForegroundColor DarkGreen
+Write-Host ""
+Write-Host "  🖥️   Admin Dashboard" -ForegroundColor White
+Write-Host "      http://localhost:8501        ← open in browser" -ForegroundColor Green
+Write-Host "      Login: admin / cropradar123" -ForegroundColor DarkGreen
+Write-Host ""
+Write-Host "  📱  WhatsApp Webhook (paste into Twilio)" -ForegroundColor White
+if ($tunnelUrl) {
+    Write-Host "      $webhookUrl" -ForegroundColor Yellow
+} else {
+    Write-Host "      (tunnel URL not detected — check cloudflared output)" -ForegroundColor Yellow
+}
+Write-Host ""
+Write-Host "  🤖  Telegram Bot" -ForegroundColor White
+Write-Host "      Running via long-polling — no URL needed" -ForegroundColor DarkGreen
+Write-Host ""
+Write-Host $divider -ForegroundColor DarkCyan
+Write-Host "  Press Ctrl+C to stop the tunnel." -ForegroundColor DarkGray
 Write-Host "  Close individual windows to stop each service." -ForegroundColor DarkGray
+Write-Host $divider -ForegroundColor DarkCyan
 Write-Host ""
 
 # Keep this window open (tunnel job runs here)
