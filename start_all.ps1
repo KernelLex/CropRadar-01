@@ -39,7 +39,7 @@ Write-Host "  [1/4] Launching FastAPI backend (port 8000)..." -ForegroundColor G
 Start-Process powershell -ArgumentList @(
     "-NoExit",
     "-Command",
-    "cd '$ROOT'; Write-Host '-- FastAPI Backend --' -ForegroundColor Green; & '$PY' -m uvicorn api:app --reload --port 8000"
+    "cd '$ROOT'; Write-Host '-- FastAPI Backend --' -ForegroundColor Green; & '$PY' -m uvicorn api:app --reload --host 0.0.0.0 --port 8000"
 ) -WindowStyle Normal
 
 Start-Sleep -Seconds 2
@@ -79,43 +79,55 @@ $tunnelUrl = $null
 $webhookUrl = $null
 
 if ($cloudflared) {
-    Write-Host "  Starting cloudflared tunnel -> http://localhost:5001" -ForegroundColor Cyan
+    Write-Host "  Starting cloudflared tunnels -> :8000 (API) and :5001 (WhatsApp)" -ForegroundColor Cyan
     Write-Host ""
 
-    $tunnelJob = Start-Job -ScriptBlock {
+    $tunnelJobApi = Start-Job -ScriptBlock {
+        cloudflared tunnel --url http://localhost:8000 2>&1
+    }
+    $tunnelJobWa = Start-Job -ScriptBlock {
         cloudflared tunnel --url http://localhost:5001 2>&1
     }
 
+    $apiUrl = $null
+
     $attempts = 0
-    while (-not $tunnelUrl -and $attempts -lt 24) {
+    while ((-not $tunnelUrl -or -not $apiUrl) -and $attempts -lt 40) {
         Start-Sleep -Milliseconds 500
-        $output = Receive-Job $tunnelJob
-        foreach ($line in $output) {
-            if ($line -match "https://[a-z0-9\-]+\.trycloudflare\.com") {
-                $tunnelUrl = $matches[0]
-                break
+        if (-not $apiUrl) {
+            $output = Receive-Job $tunnelJobApi
+            foreach ($line in $output) {
+                if ($line -match "https://[a-z0-9\-]+\.trycloudflare\.com") {
+                    $apiUrl = $matches[0]; break
+                }
+            }
+        }
+        if (-not $tunnelUrl) {
+            $output = Receive-Job $tunnelJobWa
+            foreach ($line in $output) {
+                if ($line -match "https://[a-z0-9\-]+\.trycloudflare\.com") {
+                    $tunnelUrl = $matches[0]; break
+                }
             }
         }
         $attempts++
     }
 
-    if ($tunnelUrl) {
-        $webhookUrl = "$tunnelUrl/whatsapp"
-        Write-Host ""
-        Write-Host "  +-----------------------------------------------------+" -ForegroundColor Green
-        Write-Host "  |  [OK] Tunnel is live!                               |" -ForegroundColor Green
+    if ($tunnelUrl) { $webhookUrl = "$tunnelUrl/whatsapp" }
+
+    Write-Host ""
+    Write-Host "  +-----------------------------------------------------+" -ForegroundColor Green
+    Write-Host "  |  [OK] Tunnels are live!                             |" -ForegroundColor Green
+    Write-Host "  |                                                     |" -ForegroundColor Green
+    if ($apiUrl) {
+        Write-Host "  |  App Backend URL (paste into app API Settings):     |" -ForegroundColor Green
+        Write-Host "  |  $apiUrl" -ForegroundColor Cyan
         Write-Host "  |                                                     |" -ForegroundColor Green
-        Write-Host "  |  WhatsApp Webhook URL:                              |" -ForegroundColor Green
-        Write-Host "  |  $webhookUrl" -ForegroundColor Yellow
-        Write-Host "  |                                                     |" -ForegroundColor Green
-        Write-Host "  |  Paste this into Twilio sandbox settings            |" -ForegroundColor Green
-        Write-Host "  |  -> 'When a message comes in'                       |" -ForegroundColor Green
-        Write-Host "  +-----------------------------------------------------+" -ForegroundColor Green
     }
-    else {
-        Write-Host "  Tunnel started but URL not detected yet." -ForegroundColor Yellow
-        Write-Host "  Check the cloudflared output for the https:// URL."
-    }
+    Write-Host "  |  WhatsApp Webhook URL (paste into Twilio):          |" -ForegroundColor Green
+    Write-Host "  |  $webhookUrl" -ForegroundColor Yellow
+    Write-Host "  |                                                     |" -ForegroundColor Green
+    Write-Host "  +-----------------------------------------------------+" -ForegroundColor Green
 }
 else {
     Write-Host "  cloudflared not found - skipping tunnel." -ForegroundColor Yellow
@@ -138,11 +150,17 @@ Write-Host "  * Admin Dashboard" -ForegroundColor White
 Write-Host "      http://localhost:8501        <- open in browser" -ForegroundColor Green
 Write-Host "      Login: admin / cropradar123" -ForegroundColor DarkGreen
 Write-Host ""
+Write-Host "  * App Backend URL (paste into app Settings gear)" -ForegroundColor White
+if ($apiUrl) {
+    Write-Host "      $apiUrl" -ForegroundColor Cyan
+} else {
+    Write-Host "      (tunnel URL not detected)" -ForegroundColor Yellow
+}
+Write-Host ""
 Write-Host "  * WhatsApp Webhook (paste into Twilio)" -ForegroundColor White
 if ($tunnelUrl) {
     Write-Host "      $webhookUrl" -ForegroundColor Yellow
-}
-else {
+} else {
     Write-Host "      (tunnel URL not detected - check cloudflared output)" -ForegroundColor Yellow
 }
 Write-Host ""
@@ -156,5 +174,6 @@ Write-Host $divider -ForegroundColor DarkCyan
 Write-Host ""
 
 if ($cloudflared) {
-    Wait-Job $tunnelJob | Out-Null
+    if ($tunnelJobApi) { Wait-Job $tunnelJobApi | Out-Null }
+    if ($tunnelJobWa)  { Wait-Job $tunnelJobWa  | Out-Null }
 }

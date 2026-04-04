@@ -4,9 +4,20 @@ database.py - SQLite database layer for CropRadar
 
 import math
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+
+# ---------------------------------------------------------------------------
+# Timezone helper
+# ---------------------------------------------------------------------------
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def fmt_ist(ts: float) -> str:
+    """Format a Unix timestamp (float) as an IST datetime string."""
+    return datetime.fromtimestamp(ts, tz=IST).strftime("%Y-%m-%d %H:%M IST")
 
 # Always resolve relative to THIS file so the DB is found regardless of CWD
 DB_PATH = str(Path(__file__).resolve().parent / "cropradar.db")

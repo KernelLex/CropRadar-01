@@ -12,7 +12,7 @@ Login:
 import json
 import os
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -58,10 +58,18 @@ def execute(sql: str, params: tuple = ()) -> None:
         conn.commit()
 
 
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
 def fmt_ts(ts: str) -> str:
+    """Parse a UTC ISO timestamp string and return it formatted in IST."""
     try:
         dt = datetime.fromisoformat(ts)
-        return dt.strftime("%d %b %Y  %H:%M")
+        # Stored values are UTC-naive ISO strings from datetime.utcnow().isoformat()
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        dt_ist = dt.astimezone(IST)
+        return dt_ist.strftime("%d %b %Y  %H:%M IST")
     except Exception:
         return ts or "—"
 
@@ -162,9 +170,11 @@ if page == "📊 Overview":
     with col_right:
         st.subheader("📅 Reports Over Time")
         if not reports_df.empty:
-            reports_df["date"] = pd.to_datetime(
-                reports_df["timestamp"], errors="coerce"
-            ).dt.date
+            reports_df["date"] = (
+                pd.to_datetime(reports_df["timestamp"], errors="coerce", utc=True)
+                .dt.tz_convert("Asia/Kolkata")
+                .dt.date
+            )
             timeline = reports_df.groupby("date").size().reset_index(name="Count")
             st.line_chart(timeline.set_index("date"))
         else:
@@ -376,7 +386,11 @@ elif page == "⚠️ Outbreak Alerts":
 
     st.markdown("---")
     st.subheader("📅 Alerts Per Day")
-    df["date"] = pd.to_datetime(df["triggered_at"], errors="coerce").dt.date
+    df["date"] = (
+        pd.to_datetime(df["triggered_at"], errors="coerce", utc=True)
+        .dt.tz_convert("Asia/Kolkata")
+        .dt.date
+    )
     timeline = df.groupby("date").size().reset_index(name="Alerts")
     st.bar_chart(timeline.set_index("date"))
 

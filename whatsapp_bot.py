@@ -103,13 +103,15 @@ def twiml(text: str) -> Response:
 
 def send_message(to: str, text: str) -> None:
     """Send an outbound WhatsApp message via Twilio REST API."""
+    print(f"[send_message] to={to} sid={TWILIO_ACCOUNT_SID} token_set={bool(TWILIO_AUTH_TOKEN)}")
     try:
-        requests.post(
+        resp = requests.post(
             f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json",
             auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
             data={"From": TWILIO_WA_NUMBER, "To": to, "Body": text},
             timeout=15,
         )
+        print(f"[send_message] status={resp.status_code} body={resp.text[:300]}")
     except Exception as e:
         print(f"[send_message error] {e}")
 
@@ -286,19 +288,35 @@ def whatsapp_webhook():
     # ── Reset ──────────────────────────────────────────────────────────────
     if body.lower() in ("hi", "hello", "start", "restart", "/start"):
         sessions[sender] = {"state": WAITING_LANGUAGE, "lang": "en"}
-        return twiml(s("en", "welcome"))   # fast — return directly
+        threading.Thread(
+            target=send_message, args=(sender, s("en", "welcome")), daemon=True
+        ).start()
+        return empty_twiml()
 
-    # ── Language selection (fast) ──────────────────────────────────────────
+    # ── Language selection ─────────────────────────────────────────────────
     if session["state"] == WAITING_LANGUAGE:
         if body in ("1", "1️⃣"):
             session.update(lang="en", state=WAITING_LOCATION)
             database.upsert_whatsapp_user(sender, "en")
-            return twiml(s("en", "language_set") + "\n\n" + s("en", "ask_location"))
+            threading.Thread(
+                target=send_message,
+                args=(sender, s("en", "language_set") + "\n\n" + s("en", "ask_location")),
+                daemon=True,
+            ).start()
+            return empty_twiml()
         if body in ("2", "2️⃣"):
             session.update(lang="kn", state=WAITING_LOCATION)
             database.upsert_whatsapp_user(sender, "kn")
-            return twiml(s("kn", "language_set") + "\n\n" + s("kn", "ask_location"))
-        return twiml(s("en", "invalid_choice"))
+            threading.Thread(
+                target=send_message,
+                args=(sender, s("kn", "language_set") + "\n\n" + s("kn", "ask_location")),
+                daemon=True,
+            ).start()
+            return empty_twiml()
+        threading.Thread(
+            target=send_message, args=(sender, s("en", "invalid_choice")), daemon=True
+        ).start()
+        return empty_twiml()
 
     lang  = session["lang"]
     state = session["state"]
@@ -333,7 +351,10 @@ def whatsapp_webhook():
                 daemon=True,
             ).start()
             return empty_twiml()
-        return twiml(s(lang, "ask_photo"))
+        threading.Thread(
+            target=send_message, args=(sender, s(lang, "ask_photo")), daemon=True
+        ).start()
+        return empty_twiml()
 
     # ── Text in location state ────────────────────────────────────────────
     if state == WAITING_LOCATION:
@@ -345,9 +366,15 @@ def whatsapp_webhook():
                 daemon=True,
             ).start()
             return empty_twiml()
-        return twiml(s(lang, "invalid_location"))
+        threading.Thread(
+            target=send_message, args=(sender, s(lang, "invalid_location")), daemon=True
+        ).start()
+        return empty_twiml()
 
-    return twiml(s(lang, "ask_photo"))
+    threading.Thread(
+        target=send_message, args=(sender, s(lang, "ask_photo")), daemon=True
+    ).start()
+    return empty_twiml()
 
 
 @app.route("/health")
@@ -358,6 +385,9 @@ def health():
 if __name__ == "__main__":
     port = int(os.getenv("WHATSAPP_PORT", 5001))
     print(f"\n🌱 CropRadar — Twilio WhatsApp Bot")
-    print(f"   Port    : {port}")
-    print(f"   Webhook : http://<tunnel-url>/whatsapp\n")
+    print(f"   Port      : {port}")
+    print(f"   SID set   : {bool(TWILIO_ACCOUNT_SID)}")
+    print(f"   Token set : {bool(TWILIO_AUTH_TOKEN)}")
+    print(f"   SID value : {TWILIO_ACCOUNT_SID}")
+    print(f"   Webhook   : http://<tunnel-url>/whatsapp\n")
     app.run(host="0.0.0.0", port=port, debug=True, use_reloader=False)
