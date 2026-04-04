@@ -147,6 +147,39 @@ CREATE TABLE IF NOT EXISTS daily_alerts_log (
 );
 """
 
+CREATE_SMS_SUBSCRIBERS_SQL = """
+CREATE TABLE IF NOT EXISTS sms_subscribers (
+    phone_number      TEXT PRIMARY KEY,
+    language          TEXT DEFAULT 'en',
+    onboarding_state  TEXT DEFAULT 'awaiting_language',
+    subscription_status TEXT DEFAULT 'pending',
+    pincode           TEXT,
+    district          TEXT,
+    state             TEXT,
+    latitude          REAL,
+    longitude         REAL,
+    crop_type         TEXT,
+    is_active         INTEGER DEFAULT 0,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    last_alert_sent_at TEXT,
+    last_risk_alert_date TEXT,
+    last_outbreak_alert_id INTEGER
+);
+"""
+
+CREATE_SMS_ALERT_LOG_SQL = """
+CREATE TABLE IF NOT EXISTS sms_alert_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone_number    TEXT NOT NULL,
+    alert_type      TEXT NOT NULL,
+    message_text    TEXT,
+    sent_at         TEXT NOT NULL,
+    delivery_status TEXT DEFAULT 'sent',
+    error_message   TEXT
+);
+"""
+
 
 def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
@@ -165,6 +198,8 @@ def init_db() -> None:
         conn.execute(CREATE_NDVI_SNAPSHOTS_SQL)
         conn.execute(CREATE_RISK_SCORES_SQL)
         conn.execute(CREATE_DAILY_ALERTS_LOG_SQL)
+        conn.execute(CREATE_SMS_SUBSCRIBERS_SQL)
+        conn.execute(CREATE_SMS_ALERT_LOG_SQL)
         # Migrations for existing databases
         for migration in [
             "ALTER TABLE disease_reports ADD COLUMN photo_path TEXT",
@@ -846,3 +881,103 @@ def get_nearby_app_devices(
         dict(r) for r in rows
         if _haversine_km(lat, lon, r["latitude"], r["longitude"]) <= radius_km
     ]
+
+
+# ---------------------------------------------------------------------------
+# SMS Lite Subscribers persistence
+# ---------------------------------------------------------------------------
+
+def upsert_sms_subscriber(
+    phone_number: str,
+    language: str = "en",
+    onboarding_state: str = "awaiting_language",
+) -> None:
+    now = datetime.utcnow().isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO sms_subscribers
+                (phone_number, language, onboarding_state, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(phone_number) DO UPDATE SET
+                language = excluded.language,
+                onboarding_state = excluded.onboarding_state,
+                updated_at = excluded.updated_at
+            """,
+            (phone_number, language, onboarding_state, now, now),
+        )
+        conn.commit()
+
+def get_sms_subscriber(phone_number: str) -> Optional[dict]:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM sms_subscribers WHERE phone_number = ?", 
+            (phone_number,)
+        ).fetchone()
+    return dict(row) if row else None
+
+def update_sms_subscriber_state(phone_number: str, state: str, **extra_fields) -> None:
+    now = datetime.utcnow().isoformat()
+    fields = ["onboarding_state = ?", "updated_at = ?"]
+    values = [state, now]
+    
+    for k, v in extra_fields.items():
+        fields.append(f"{k} = ?")
+        values.append(v)
+        
+    values.append(phone_number)
+    
+    query = f"UPDATE sms_subscribers SET {', '.join(fields)} WHERE phone_number = ?"
+    with get_connection() as conn:
+        conn.execute(query, tuple(values))
+        conn.commit()
+
+def get_all_active_sms_subscribers() -> list[dict]:
+    """Return all active SMS users with location for daily alerts."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT phone_number, language, latitude, longitude, crop_type
+            FROM sms_subscribers
+            WHERE is_active = 1
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            """
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+def get_nearby_sms_subscribers(lat: float, lon: float, radius_km: float = 50) -> list[dict]:
+    """Return active SMS users whose saved location is within radius_km."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT phone_number, language, latitude, longitude
+            FROM sms_subscribers
+            WHERE is_active = 1
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            """
+        ).fetchall()
+        
+    return [
+        dict(r) for r in rows
+        if _haversine_km(lat, lon, r["latitude"], r["longitude"]) <= radius_km
+    ]
+
+def log_sms_alert(phone_number: str, alert_type: str, message: str, status: str = 'sent', error: str = '') -> None:
+    now = datetime.utcnow().isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO sms_alert_log (phone_number, alert_type, message_text, sent_at, delivery_status, error_message)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (phone_number, alert_type, message, now, status, error),
+        )
+        
+        # update last_alert_sent_at in subscriber
+        conn.execute(
+            "UPDATE sms_subscribers SET last_alert_sent_at = ? WHERE phone_number = ?",
+            (now, phone_number)
+        )
+        conn.commit()

@@ -14,7 +14,7 @@ Farmers often detect crop diseases too late — by the time visible symptoms app
 
 ## 💡 Solution
 
-CropRadar puts disease intelligence directly in a farmer's hands through messaging interfaces they already use — **Telegram** and **WhatsApp**. A farmer simply:
+CropRadar puts disease intelligence directly in a farmer's hands through messaging interfaces they already use — **Telegram**, **WhatsApp**, and **basic SMS** for keypad phones. A smartphone user simply:
 
 1. Opens the bot and selects their language (English or ಕನ್ನಡ)
 2. Shares their GPS location
@@ -27,7 +27,7 @@ After onboarding, the system works **proactively** — sending:
 - 🌱 **Weekly crop stage advisories** (Mondays) with growth-stage-specific guidance
 - 🚨 **Outbreak broadcasts** when disease clusters are detected nearby
 
-All alerts are bilingual, deduplicated, and delivered across **Telegram, WhatsApp, and Android push notifications**.
+All alerts are bilingual, deduplicated, and delivered across **Telegram, WhatsApp, SMS, and Android push notifications**.
 
 ---
 
@@ -40,7 +40,7 @@ All alerts are bilingual, deduplicated, and delivered across **Telegram, WhatsAp
 - 🗺️ **Regional outbreak map** — interactive Streamlit + Folium dashboard with clustered markers
 - 🌐 **Bilingual interface** — full English and Kannada (ಕನ್ನಡ) support, including AI responses in Kannada
 - 📍 **GPS-linked reports** — every diagnosis is geo-tagged via native location sharing
-- 💬 **Multi-channel interface** — Telegram, WhatsApp (Twilio), and Android app (Flutter + FCM)
+- 💬 **Multi-channel interface** — Telegram, WhatsApp (Twilio), Android app (Flutter + FCM), and SMS (basic phones)
 
 ### 🔮 Predictive Risk Analysis
 - 🌦️ **Live weather integration** — real-time weather data via [Open-Meteo](https://open-meteo.com/) (free, no API key required), including temperature, humidity, precipitation, wind speed, and 7-day history
@@ -67,7 +67,7 @@ All alerts are bilingual, deduplicated, and delivered across **Telegram, WhatsAp
 | Layer | Technology |
 |-------|------------|
 | Backend API | Python · FastAPI · Uvicorn |
-| Bot Interfaces | Telegram Bot API · WhatsApp (Twilio) · Android (Flutter + FCM) |
+| Bot Interfaces | Telegram Bot API · WhatsApp (Twilio) · SMS · Android (Flutter) |
 | AI Vision | Google Gemini Vision (gemini-2.5-flash) |
 | Weather Data | Open-Meteo API (free, no key required) |
 | Risk Scoring | Rule-based weighted engine (weather + NDVI + disease context) |
@@ -245,6 +245,10 @@ CropRadar-01/
 │
 ├── crop_stage.py           🆕 Crop growth stage estimator (10 crops)
 ├── scheduler.py            🆕 APScheduler (daily/weekly/outbreak jobs)
+├── sms_service.py          📱 SMS Lite — Provider wrapper
+├── sms_subscribers.py      📱 SMS Lite — Onboarding state machine
+├── sms_templates.py        📱 SMS Lite — Bilingual message templates
+├── pincode_data.json       📱 SMS Lite — Location lookup
 │
 ├── cropradar_app/          Flutter Android app
 │   ├── lib/main.dart

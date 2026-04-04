@@ -107,6 +107,7 @@ with st.sidebar:
     page = st.radio(
         "Navigate",
         ["📊 Overview", "🦠 Disease Reports", "👥 Bot Users",
+         "📱 SMS Subscribers",
          "⚠️ Outbreak Alerts", "📬 Proactive Alerts",
          "🌤️ Weather Cache",
          "🛰️ NDVI Snapshots", "📈 Risk Scores"],
@@ -130,22 +131,23 @@ if page == "📊 Overview":
 
     reports_df  = query("SELECT * FROM disease_reports ORDER BY timestamp DESC")
     users_df    = query("SELECT * FROM bot_users")
+    sms_df      = query("SELECT * FROM sms_subscribers")
     alerts_df   = query("SELECT * FROM outbreak_notifications ORDER BY triggered_at DESC")
     risk_df     = query("SELECT * FROM risk_scores ORDER BY created_at DESC")
 
     # KPI row
     col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("📋 Total Reports",    len(reports_df))
-    col2.metric("👥 Bot Users",        len(users_df))
-    col3.metric("⚠️ Outbreak Alerts",  len(alerts_df))
-    col4.metric("📈 Risk Assessments", len(risk_df))
-
+    col1.metric("📋 Reports",          len(reports_df))
+    col2.metric("👥 TG/WA Users",      len(users_df))
+    col3.metric("📱 SMS Users",        len(sms_df))
+    col4.metric("⚠️ Outbreak",         len(alerts_df))
+    
     if not reports_df.empty:
         cutoff = (datetime.utcnow() - timedelta(hours=48)).isoformat()
         recent = reports_df[reports_df["timestamp"] >= cutoff]
-        col5.metric("🕐 Reports (48h)", len(recent))
+        col5.metric("📈 Risk Assess", len(risk_df))
     else:
-        col5.metric("🕐 Reports (48h)", 0)
+        col5.metric("📈 Risk Assess", len(risk_df))
 
     st.markdown("---")
 
@@ -613,3 +615,61 @@ elif page == "📬 Proactive Alerts":
         execute("DELETE FROM daily_alerts_log")
         st.success("Alert logs cleared.")
         st.rerun()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SMS Subscribers
+# ─────────────────────────────────────────────────────────────────────────────
+elif page == "📱 SMS Subscribers":
+    st.title("📱 SMS Subscribers")
+    
+    st.markdown("Monitor farmers subscribing to CropRadar via basic keypad phones.")
+    
+    sms_users_df = query("SELECT * FROM sms_subscribers ORDER BY created_at DESC")
+    sms_logs_df = query("SELECT * FROM sms_alert_log ORDER BY sent_at DESC LIMIT 500")
+
+    if not sms_users_df.empty:
+        c1, c2, c3, c4 = st.columns(4)
+        total = len(sms_users_df)
+        active = len(sms_users_df[sms_users_df["is_active"] == 1])
+        unsub = len(sms_users_df[sms_users_df["onboarding_state"] == "unsubscribed"])
+        pending = total - active - unsub
+        
+        c1.metric("Total Profiles", total)
+        c2.metric("Active Subscribers", active)
+        c3.metric("Onboarding", pending)
+        c4.metric("Unsubscribed", unsub)
+        
+        st.markdown("---")
+        
+        col_L, col_R = st.columns(2)
+        with col_L:
+            st.subheader("🌐 Language Pref")
+            lang_counts = sms_users_df["language"].value_counts().reset_index()
+            lang_counts.columns = ["Language", "Count"]
+            st.bar_chart(lang_counts.set_index("Language"))
+            
+        with col_R:
+            st.subheader("🌾 Crop Distribution")
+            valid_crop = sms_users_df[~sms_users_df["crop_type"].isna()]
+            if not valid_crop.empty:
+                crop_counts = valid_crop["crop_type"].value_counts().reset_index()
+                crop_counts.columns = ["Crop", "Count"]
+                st.bar_chart(crop_counts.set_index("Crop"))
+            else:
+                st.info("No crops registered yet.")
+                
+        st.subheader("👥 Subscriber List")
+        st.dataframe(sms_users_df, use_container_width=True)
+    else:
+        st.info("No SMS subscribers found.")
+
+    st.markdown("---")
+    st.subheader("📬 Recent SMS Alert Logs")
+    if not sms_logs_df.empty:
+        st.dataframe(sms_logs_df, use_container_width=True)
+        failed_df = sms_logs_df[sms_logs_df["delivery_status"] != "sent"]
+        if not failed_df.empty:
+            st.warning(f"Found {len(failed_df)} failed SMS deliveries.")
+            st.dataframe(failed_df, use_container_width=True)
+    else:
+        st.info("No SMS alerts sent yet.")

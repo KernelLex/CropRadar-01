@@ -17,6 +17,9 @@ from pathlib import Path
 
 import requests
 
+import sms_service
+import sms_templates
+
 logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN     = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -144,13 +147,16 @@ def broadcast_outbreak_alert(
     telegram_users: list[dict],
     whatsapp_users: list[dict],
     app_devices: list[dict],
+    sms_users: list[dict] = None,
 ) -> dict:
+    sms_users = sms_users or []
     tg  = _broadcast_telegram(disease, count, telegram_users)
     wa  = _broadcast_whatsapp(disease, count, whatsapp_users)
     fcm = _broadcast_fcm(disease, count, app_devices)
-    logger.info("Outbreak broadcast — disease=%s  tg=%d  wa=%d  fcm=%d",
-                disease, tg, wa, fcm)
-    return {"telegram": tg, "whatsapp": wa, "fcm": fcm}
+    sms = _broadcast_sms(disease, count, sms_users)
+    logger.info("Outbreak broadcast — disease=%s  tg=%d  wa=%d  fcm=%d sms=%d",
+                disease, tg, wa, fcm, sms)
+    return {"telegram": tg, "whatsapp": wa, "fcm": fcm, "sms": sms}
 
 
 # ---------------------------------------------------------------------------
@@ -358,4 +364,24 @@ def _broadcast_fcm(disease: str, count: int, devices: list[dict]) -> int:
         except Exception as exc:
             logger.warning("FCM V1 error: %s", exc)
 
+    return sent
+
+# ---------------------------------------------------------------------------
+# Channel 4 — SMS Lite
+# ---------------------------------------------------------------------------
+
+def _broadcast_sms(disease: str, count: int, users: list[dict]) -> int:
+    if not users:
+        return 0
+    
+    sent = 0
+    for user in users:
+        lang = user.get("language", "en")
+        text = sms_templates.get_template(lang, "OUTBREAK_ALERT", crop=disease)
+        try:
+            if sms_service.send_sms(user["phone_number"], text):
+                sent += 1
+        except Exception as exc:
+            logger.warning("SMS fail phone=%s: %s", user["phone_number"], exc)
+            
     return sent

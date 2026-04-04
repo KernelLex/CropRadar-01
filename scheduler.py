@@ -23,6 +23,8 @@ import satellite_service
 import risk_model
 import risk_report as risk_report_module
 import crop_stage
+import sms_service
+import sms_templates
 
 logger = logging.getLogger(__name__)
 
@@ -133,10 +135,44 @@ def _run_daily_risk_job():
         except Exception as exc:
             logger.warning("Daily risk FCM error: %s", exc)
 
+    # ── SMS Subscribers ───────────────────────────────────────────────────
+    sms_sent = 0
+    try:
+        sms_users = database.get_all_active_sms_subscribers()
+    except Exception as exc:
+        logger.error("Failed to get SMS users: %s", exc)
+        sms_users = []
+
+    for user in sms_users:
+        phone = user["phone_number"]
+        if database.was_alert_sent_today(phone, "daily_risk"):
+            continue
+        try:
+            result = _compute_risk(
+                user["latitude"], user["longitude"],
+                user.get("crop_type"),
+            )
+            if result and result["risk_level"] in ("Medium", "High"):
+                lang = user.get("language", "en")
+                msg = sms_templates.get_template(
+                    lang, "RISK_ALERT", 
+                    risk_level=result["risk_level"], 
+                    crop=user.get("crop_type", "Crop")
+                )
+                if sms_service.send_sms(phone, msg):
+                    database.record_alert_sent(phone, "sms", "daily_risk")
+                    database.log_sms_alert(phone, "daily_risk", msg, "sent")
+                    sms_sent += 1
+                else:
+                    database.log_sms_alert(phone, "daily_risk", msg, "failed")
+        except Exception as exc:
+            logger.warning("Daily risk SMS error for %s: %s", phone, exc)
+
     logger.info(
-        "=== Daily risk job done — TG=%d WA=%d FCM=%d ===",
-        tg_sent, wa_sent, fcm_sent,
+        "=== Daily risk job done — TG=%d WA=%d FCM=%d SMS=%d ===",
+        tg_sent, wa_sent, fcm_sent, sms_sent
     )
+
 
 
 def _build_daily_message(lat, lon, language, crop_type=None):
@@ -357,14 +393,15 @@ def _run_outbreak_scan_job():
         tg_users = database.get_nearby_users(avg_lat, avg_lon, radius_km=50)
         wa_users = database.get_nearby_whatsapp_users(avg_lat, avg_lon, radius_km=50)
         app_devs = database.get_nearby_app_devices(avg_lat, avg_lon, radius_km=50)
+        sms_subs = database.get_nearby_sms_subscribers(avg_lat, avg_lon, radius_km=50)
 
-        if not tg_users and not wa_users and not app_devs:
+        if not tg_users and not wa_users and not app_devs and not sms_subs:
             continue
 
         database.record_outbreak_notification(disease, avg_lat, avg_lon)
         notifier.broadcast_outbreak_alert(
             disease, len(reps),
-            tg_users, wa_users, app_devs,
+            tg_users, wa_users, app_devs, sms_subs
         )
         alerts_sent += 1
 

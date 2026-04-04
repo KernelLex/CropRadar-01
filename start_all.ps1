@@ -148,6 +148,10 @@ if ($tunnelUrl) {
     Write-Host "      (tunnel URL not detected — check cloudflared output)" -ForegroundColor Yellow
 }
 Write-Host ""
+Write-Host "  💬  SMS Webhook (CropRadar SMS Lite)" -ForegroundColor White
+Write-Host "      http://localhost:8000/sms/webhook" -ForegroundColor DarkGreen
+Write-Host "      (Uses FastAPI — configure provider webhook to hit this endpoint)" -ForegroundColor DarkGreen
+Write-Host ""
 Write-Host "  🤖  Telegram Bot" -ForegroundColor White
 Write-Host "      Running via long-polling — no URL needed" -ForegroundColor DarkGreen
 Write-Host ""

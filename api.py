@@ -26,6 +26,8 @@ import vision_diagnosis
 import audio_transcription
 import scheduler as scheduler_module
 import crop_stage
+import sms_subscribers
+import sms_service
 
 # Directory where uploaded crop photos are persisted
 PHOTOS_DIR = Path("photos")
@@ -160,19 +162,20 @@ def _maybe_broadcast_outbreak(
         )
         return
 
-    # Gather users across all three channels
+    # Gather users across all channels
     telegram_users  = database.get_nearby_users(lat, lon, radius_km=50)
     whatsapp_users  = database.get_nearby_whatsapp_users(lat, lon, radius_km=50)
     app_devices     = database.get_nearby_app_devices(lat, lon, radius_km=50)
+    sms_users       = database.get_nearby_sms_subscribers(lat, lon, radius_km=50)
 
-    if not telegram_users and not whatsapp_users and not app_devices:
+    if not telegram_users and not whatsapp_users and not app_devices and not sms_users:
         logger.info("Outbreak detected but no nearby users to notify.")
         return
 
     database.record_outbreak_notification(disease_type, lat, lon)
     notifier.broadcast_outbreak_alert(
         disease_type, match["count"],
-        telegram_users, whatsapp_users, app_devices,
+        telegram_users, whatsapp_users, app_devices, sms_users
     )
 
 
@@ -497,3 +500,33 @@ def get_alerts_log(limit: int = 100):
 def get_supported_crops():
     """Return the list of supported crop types."""
     return {"crops": crop_stage.SUPPORTED_CROPS}
+
+
+# ---------------------------------------------------------------------------
+# SMS Lite routes
+# ---------------------------------------------------------------------------
+
+@app.post("/sms/webhook", tags=["sms"])
+async def sms_webhook(From: str = Form(...), Body: str = Form("")):
+    """Incoming SMS webhook — processes onboarding and commands."""
+    reply = sms_subscribers.process_incoming_sms(From, Body)
+    sms_service.send_sms(From, reply)
+    return {"status": "ok"}
+
+
+@app.post("/scheduler/trigger-sms-test", tags=["scheduler"])
+def trigger_sms_test():
+    """Send a test SMS alert to all subscribers (admin/testing)."""
+    subs = database.get_all_active_sms_subscribers()
+    sent = 0
+    for sub in subs:
+        phone = sub["phone_number"]
+        lang = sub.get("language", "en")
+        msg = f"CropRadar Test: This is a test alert in {lang}."
+        if sms_service.send_sms(phone, msg):
+            sent += 1
+            database.log_sms_alert(phone, "test", msg, "sent")
+        else:
+            database.log_sms_alert(phone, "test", msg, "failed", "Provider error")
+    return {"status": "triggered", "sent_count": sent}
+
