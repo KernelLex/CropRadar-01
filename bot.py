@@ -6,8 +6,9 @@ Conversation flow:
     └─► Language choice (English / ಕನ್ನಡ)  [WAITING_LANGUAGE]
          └─► Ask for location               [WAITING_LOCATION]
               └─► Check nearby outbreaks
-                   └─► Ask for crop photo   [WAITING_PHOTO]
-                        └─► Diagnose → reply → loop back for next photo
+                   └─► Ask for crop type     [WAITING_CROP]
+                        └─► Ask for photo    [WAITING_PHOTO]
+                             └─► Diagnose → reply → loop back
 """
 
 from dotenv import load_dotenv
@@ -19,6 +20,7 @@ import tempfile
 from pathlib import Path
 
 import database as database
+import crop_stage
 import requests
 import risk_features
 import risk_model
@@ -54,11 +56,15 @@ logger = logging.getLogger(__name__)
 # Conversation states
 WAITING_LANGUAGE = 0
 WAITING_LOCATION = 1
-WAITING_PHOTO    = 2
+WAITING_CROP     = 2
+WAITING_PHOTO    = 3
 
 # Trigger texts for language buttons
 LANG_EN = "🇬🇧 English"
 LANG_KN = "🇮🇳 ಕನ್ನಡ"
+
+# Supported crop list (matches crop_stage.SUPPORTED_CROPS)
+CROP_LIST = crop_stage.SUPPORTED_CROPS
 
 
 # ---------------------------------------------------------------------------
@@ -82,8 +88,15 @@ STRINGS = {
         "location_received": "✅ Location received — *{lat:.4f}°, {lon:.4f}°*\n\n🔍 Checking for disease outbreaks in your area…",
         "outbreak_header": "⚠️ *Outbreak Risk Alert!*\n\nThe following diseases have been reported near you recently:\n",
         "outbreak_row": "🦠 *{disease}* — {count} reports within 50 km",
-        "outbreak_footer": "\n\n🛡️ Apply preventive treatment and monitor your crops closely.\n\n📸 *Step 2:* Now send me a photo of your crop leaf and I'll analyse it.",
-        "no_outbreak": "✅ *No active outbreaks detected near you.*\n\n📸 *Step 2:* Send me a photo of your crop leaf and I'll diagnose it!",
+        "outbreak_footer": "\n\n🛡️ Apply preventive treatment and monitor your crops closely.",
+        "no_outbreak": "✅ *No active outbreaks detected near you.*",
+        "ask_crop": (
+            "\n\n🌱 *Step 2 — Select Your Crop*\n\n"
+            "What crop are you growing? This helps us send you "
+            "stage-specific risk advisories."
+        ),
+        "crop_set": "✅ Crop set to *{crop}*.\n\n",
+        "ask_photo": "📸 *Step 3:* Send me a photo of your crop leaf and I'll diagnose it!",
         "analysing": "🔍 Analysing your crop image, please wait…",
         "diagnosis_header": "🌿 *CropRadar Diagnosis*",
         "disease_label": "🦠 *Disease:*",
@@ -98,6 +111,7 @@ STRINGS = {
         "nudge_location": "⚠️ I need your *location* first — please tap the 📍 button below.",
         "nudge_photo": "📸 Please send a *photo* of a crop leaf to get a diagnosis.",
         "nudge_language": "Please choose a language using the buttons below:",
+        "nudge_crop": "🌱 Please select your crop using the buttons below:",
         "session_ended": "Session ended. Type /start to begin again.",
     },
     "kn": {
@@ -117,8 +131,15 @@ STRINGS = {
         "location_received": "✅ ಸ್ಥಳ ಸ್ವೀಕರಿಸಲಾಗಿದೆ — *{lat:.4f}°, {lon:.4f}°*\n\n🔍 ನಿಮ್ಮ ಪ್ರದೇಶದಲ್ಲಿ ರೋಗ ಹರಡುವಿಕೆ ಪರಿಶೀಲಿಸಲಾಗುತ್ತಿದೆ…",
         "outbreak_header": "⚠️ *ರೋಗ ಹರಡುವಿಕೆ ಎಚ್ಚರಿಕೆ!*\n\nಇತ್ತೀಚೆಗೆ ನಿಮ್ಮ ಬಳಿ ಈ ರೋಗಗಳು ವರದಿಯಾಗಿವೆ:\n",
         "outbreak_row": "🦠 *{disease}* — 50 ಕಿ.ಮೀ ಒಳಗೆ {count} ವರದಿಗಳು",
-        "outbreak_footer": "\n\n🛡️ ತಡೆಗಟ್ಟುವ ಚಿಕಿತ್ಸೆ ಅನ್ವಯಿಸಿ ಮತ್ತು ನಿಮ್ಮ ಬೆಳೆಗಳನ್ನು ಗಮನಿಸಿ.\n\n📸 *ಹಂತ 2:* ಈಗ ನಿಮ್ಮ ಬೆಳೆ ಎಲೆಯ ಫೋಟೋ ಕಳುಹಿಸಿ.",
-        "no_outbreak": "✅ *ನಿಮ್ಮ ಬಳಿ ಯಾವುದೇ ರೋಗ ಹರಡುವಿಕೆ ಕಂಡುಬಂದಿಲ್ಲ.*\n\n📸 *ಹಂತ 2:* ರೋಗ ಪತ್ತೆಗಾಗಿ ನಿಮ್ಮ ಬೆಳೆ ಎಲೆಯ ಫೋಟೋ ಕಳುಹಿಸಿ!",
+        "outbreak_footer": "\n\n🛡️ ತಡೆಗಟ್ಟುವ ಚಿಕಿತ್ಸೆ ಅನ್ವಯಿಸಿ ಮತ್ತು ನಿಮ್ಮ ಬೆಳೆಗಳನ್ನು ಗಮನಿಸಿ.",
+        "no_outbreak": "✅ *ನಿಮ್ಮ ಬಳಿ ಯಾವುದೇ ರೋಗ ಹರಡುವಿಕೆ ಕಂಡುಬಂದಿಲ್ಲ.*",
+        "ask_crop": (
+            "\n\n🌱 *ಹಂತ 2 — ನಿಮ್ಮ ಬೆಳೆ ಆಯ್ಕೆ ಮಾಡಿ*\n\n"
+            "ನೀವು ಯಾವ ಬೆಳೆ ಬೆಳೆಯುತ್ತಿದ್ದೀರಿ? ಈ ಮಾಹಿತಿ ಹಂತ-ನಿರ್ದಿಷ್ಟ "
+            "ಅಪಾಯ ಸಲಹೆಗಳನ್ನು ಕಳುಹಿಸಲು ಸಹಾಯ ಮಾಡುತ್ತದೆ."
+        ),
+        "crop_set": "✅ ಬೆಳೆ *{crop}* ಗೆ ಹೊಂದಿಸಲಾಗಿದೆ.\n\n",
+        "ask_photo": "📸 *ಹಂತ 3:* ರೋಗ ಪತ್ತೆಗಾಗಿ ನಿಮ್ಮ ಬೆಳೆ ಎಲೆಯ ಫೋಟೋ ಕಳುಹಿಸಿ!",
         "analysing": "🔍 ನಿಮ್ಮ ಬೆಳೆಯ ಚಿತ್ರ ವಿಶ್ಲೇಷಿಸಲಾಗುತ್ತಿದೆ, ದಯವಿಟ್ಟು ನಿರೀಕ್ಷಿಸಿ…",
         "diagnosis_header": "🌿 *ಕ್ರಾಪ್‌ರಾಡಾರ್ ರೋಗ ನಿರ್ಣಯ*",
         "disease_label": "🦠 *ರೋಗ:*",
@@ -133,6 +154,7 @@ STRINGS = {
         "nudge_location": "⚠️ ಮೊದಲು ನಿಮ್ಮ *ಸ್ಥಳ* ಬೇಕು — ದಯವಿಟ್ಟು ಕೆಳಗಿನ 📍 ಬಟನ್ ಅನ್ನು ಟ್ಯಾಪ್ ಮಾಡಿ.",
         "nudge_photo": "📸 ರೋಗ ನಿರ್ಣಯ ಪಡೆಯಲು ಬೆಳೆ ಎಲೆಯ *ಫೋಟೋ* ಕಳುಹಿಸಿ.",
         "nudge_language": "ದಯವಿಟ್ಟು ಕೆಳಗಿನ ಬಟನ್‌ಗಳನ್ನು ಬಳಸಿ ಭಾಷೆ ಆರಿಸಿ:",
+        "nudge_crop": "🌱 ದಯವಿಟ್ಟು ಕೆಳಗಿನ ಬಟನ್‌ಗಳನ್ನು ಬಳಸಿ ಬೆಳೆ ಆಯ್ಕೆ ಮಾಡಿ:",
         "session_ended": "ಸೆಷನ್ ಮುಕ್ತಾಯವಾಗಿದೆ. ಮತ್ತೆ ಪ್ರಾರಂಭಿಸಲು /start ಟೈಪ್ ಮಾಡಿ.",
     },
 }
@@ -162,6 +184,22 @@ def _location_keyboard(lang: str) -> ReplyKeyboardMarkup:
         [[KeyboardButton(label, request_location=True)]],
         resize_keyboard=True,
         one_time_keyboard=True,
+    )
+
+
+def _crop_keyboard() -> ReplyKeyboardMarkup:
+    """Build a keyboard with crop type buttons (2 per row)."""
+    buttons = []
+    row = []
+    for i, crop in enumerate(CROP_LIST):
+        row.append(KeyboardButton(f"🌾 {crop}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    return ReplyKeyboardMarkup(
+        buttons, resize_keyboard=True, one_time_keyboard=True,
     )
 
 
@@ -257,7 +295,7 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         reply_markup=ReplyKeyboardRemove(),
     )
 
-    # --- Predictive area-risk analysis (NEW) ---
+    # --- Predictive area-risk analysis ---
     try:
         await msg.reply_text(s(context, "risk_analysing"))
         features = risk_features.build_risk_features(lat, lon)
@@ -267,7 +305,7 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     except Exception as exc:
         logger.warning("Predictive risk analysis failed: %s", exc)
 
-    # --- Existing outbreak check (UNCHANGED) ---
+    # --- Existing outbreak check ---
     outbreaks = _check_nearby_outbreaks(lat, lon)
 
     if outbreaks:
@@ -277,11 +315,19 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 disease=ob["disease_type"], count=ob["count"]
             ))
         lines.append(s(context, "outbreak_footer"))
-        await msg.reply_text("\n".join(lines), parse_mode="Markdown")
+        lines.append(s(context, "ask_crop"))
+        await msg.reply_text(
+            "\n".join(lines), parse_mode="Markdown",
+            reply_markup=_crop_keyboard(),
+        )
     else:
-        await msg.reply_text(s(context, "no_outbreak"), parse_mode="Markdown")
+        await msg.reply_text(
+            s(context, "no_outbreak") + s(context, "ask_crop"),
+            parse_mode="Markdown",
+            reply_markup=_crop_keyboard(),
+        )
 
-    return WAITING_PHOTO
+    return WAITING_CROP
 
 
 async def wrong_input_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -292,6 +338,51 @@ async def wrong_input_location(update: Update, context: ContextTypes.DEFAULT_TYP
         reply_markup=_location_keyboard(lang),
     )
     return WAITING_LOCATION
+
+
+# ---------------------------------------------------------------------------
+# State: WAITING_CROP
+# ---------------------------------------------------------------------------
+
+async def handle_crop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Store the crop type and proceed to photo stage."""
+    text = update.message.text.strip()
+
+    # Parse crop from button text (e.g. "🌾 Rice" → "Rice")
+    crop_name = text.replace("🌾 ", "").strip()
+
+    if crop_name not in CROP_LIST:
+        await update.message.reply_text(
+            s(context, "nudge_crop"),
+            reply_markup=_crop_keyboard(),
+        )
+        return WAITING_CROP
+
+    context.user_data["crop_type"] = crop_name
+
+    # Persist crop type to database
+    try:
+        database.update_bot_user_crop(
+            update.effective_chat.id, crop_name,
+        )
+    except Exception as exc:
+        logger.warning("Failed to persist crop type: %s", exc)
+
+    await update.message.reply_text(
+        s(context, "crop_set").format(crop=crop_name) + s(context, "ask_photo"),
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    return WAITING_PHOTO
+
+
+async def wrong_input_crop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Nudge user to pick a crop button."""
+    await update.message.reply_text(
+        s(context, "nudge_crop"),
+        reply_markup=_crop_keyboard(),
+    )
+    return WAITING_CROP
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +506,12 @@ def main() -> None:
                 MessageHandler(filters.LOCATION, handle_location),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, wrong_input_location),
             ],
+            WAITING_CROP: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    handle_crop,
+                ),
+            ],
             WAITING_PHOTO: [
                 MessageHandler(filters.PHOTO, handle_photo),
                 # Allow location refresh mid-session
@@ -427,7 +524,7 @@ def main() -> None:
     )
 
     application.add_handler(conv)
-    logger.info("CropRadar bot starting (bilingual)…")
+    logger.info("CropRadar bot starting (bilingual + crop profiling)…")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

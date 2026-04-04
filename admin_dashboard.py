@@ -107,7 +107,8 @@ with st.sidebar:
     page = st.radio(
         "Navigate",
         ["📊 Overview", "🦠 Disease Reports", "👥 Bot Users",
-         "⚠️ Outbreak Alerts", "🌤️ Weather Cache",
+         "⚠️ Outbreak Alerts", "📬 Proactive Alerts",
+         "🌤️ Weather Cache",
          "🛰️ NDVI Snapshots", "📈 Risk Scores"],
         label_visibility="collapsed",
     )
@@ -519,4 +520,96 @@ elif page == "📈 Risk Scores":
     if st.button("🗑️ Clear All Risk Scores", type="primary"):
         execute("DELETE FROM risk_scores")
         st.success("Risk scores cleared.")
+        st.rerun()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Proactive Alerts Log
+# ─────────────────────────────────────────────────────────────────────────────
+
+elif page == "📬 Proactive Alerts":
+    st.title("📬 Proactive Alert Log")
+
+    df = query("SELECT * FROM daily_alerts_log ORDER BY sent_at DESC")
+
+    if df.empty:
+        st.info("No proactive alerts have been sent yet.")
+        st.caption(
+            "Alerts are sent automatically by the scheduler: "
+            "daily risk (7 AM IST), weekly stage (Mon 8 AM IST), "
+            "and outbreak scans (every 6 hours)."
+        )
+        st.stop()
+
+    # KPIs
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Alerts Sent", len(df))
+
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    today_df = df[df["sent_at"].str.startswith(today_str, na=False)]
+    col2.metric("Sent Today", len(today_df))
+
+    unique_users = df["user_key"].nunique()
+    col3.metric("Unique Users Reached", unique_users)
+
+    if "alert_type" in df.columns:
+        types = df["alert_type"].nunique()
+        col4.metric("Alert Types", types)
+
+    st.markdown("---")
+
+    # Filters
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        alert_types = ["All"] + sorted(df["alert_type"].dropna().unique().tolist())
+        sel_type = st.selectbox("Filter by Alert Type", alert_types)
+    with col2:
+        channels = ["All"] + sorted(df["channel"].dropna().unique().tolist())
+        sel_channel = st.selectbox("Filter by Channel", channels)
+    with col3:
+        days_filter = st.selectbox("Time Range", ["All", "Today", "Last 7 days", "Last 30 days"])
+
+    filtered = df.copy()
+    if sel_type != "All":
+        filtered = filtered[filtered["alert_type"] == sel_type]
+    if sel_channel != "All":
+        filtered = filtered[filtered["channel"] == sel_channel]
+    if days_filter == "Today":
+        filtered = filtered[filtered["sent_at"].str.startswith(today_str, na=False)]
+    elif days_filter == "Last 7 days":
+        cutoff = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        filtered = filtered[filtered["sent_at"] >= cutoff]
+    elif days_filter == "Last 30 days":
+        cutoff = (datetime.utcnow() - timedelta(days=30)).isoformat()
+        filtered = filtered[filtered["sent_at"] >= cutoff]
+
+    st.caption(f"Showing {len(filtered)} of {len(df)} records")
+
+    display = filtered[["id", "user_key", "channel", "alert_type", "sent_at"]].copy()
+    display["sent_at"] = display["sent_at"].apply(fmt_ts)
+    display["channel"] = display["channel"].apply(
+        lambda c: {"telegram": "📱 TG", "whatsapp": "💬 WA", "fcm": "🔔 FCM"}.get(c, c)
+    )
+    display["alert_type"] = display["alert_type"].apply(
+        lambda t: {"daily_risk": "⚡ Daily Risk", "weekly_stage": "🌱 Weekly Stage",
+                   "ndvi_drop": "📉 NDVI Drop"}.get(t, t)
+    )
+    display.columns = ["ID", "User", "Channel", "Alert Type", "Sent At"]
+    st.dataframe(display, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    st.subheader("📊 Alerts by Type")
+    type_dist = df["alert_type"].value_counts().reset_index()
+    type_dist.columns = ["Alert Type", "Count"]
+    st.bar_chart(type_dist.set_index("Alert Type"))
+
+    st.markdown("---")
+    st.subheader("📅 Alerts Per Day")
+    df["date"] = pd.to_datetime(df["sent_at"], errors="coerce").dt.date
+    timeline = df.groupby("date").size().reset_index(name="Alerts")
+    st.line_chart(timeline.set_index("date"))
+
+    st.markdown("---")
+    if st.button("🗑️ Clear All Alert Logs", type="primary"):
+        execute("DELETE FROM daily_alerts_log")
+        st.success("Alert logs cleared.")
         st.rerun()

@@ -6,6 +6,8 @@ Key design:
   - Heavy work (image download + AI analysis) runs in a background thread
   - Result sent back via Twilio REST API (outbound message)
   - Buttons via numbered quick-reply style (sandbox compatible)
+
+Flow: Language → Location → Crop Type → Photo
 """
 
 import os
@@ -17,6 +19,7 @@ import pathlib
 from flask import Flask, request, Response
 from dotenv import load_dotenv
 import database
+import crop_stage
 
 load_dotenv()
 
@@ -30,7 +33,10 @@ sessions: dict[str, dict] = {}
 
 WAITING_LANGUAGE = "WAITING_LANGUAGE"
 WAITING_LOCATION = "WAITING_LOCATION"
+WAITING_CROP     = "WAITING_CROP"
 WAITING_PHOTO    = "WAITING_PHOTO"
+
+CROP_LIST = crop_stage.SUPPORTED_CROPS
 
 # ---------------------------------------------------------------------------
 # Bilingual strings
@@ -43,15 +49,18 @@ STRINGS = {
         "location_received": "✅ Location received — *{lat:.4f}°, {lon:.4f}°*\n\n🔍 Checking for disease outbreaks in your area…",
         "outbreak_header":   "⚠️ *Outbreak Risk Alert!*\n\nThe following diseases have been reported near you recently:\n",
         "outbreak_row":      "🦠 *{disease}* — {count} reports within 50 km",
-        "outbreak_footer":   "\n\n🛡️ Apply preventive treatment and monitor your crops closely.\n\n📸 *Step 2:* Now send me a photo of your crop leaf and I'll analyse it.",
-        "no_outbreak":       "✅ *No active outbreaks detected near you.*\n\n📸 *Step 2:* Send me a photo of your crop leaf and I'll diagnose it!",
-        "ask_photo":         "📸 *Send a photo* of your crop leaf for AI diagnosis.",
+        "outbreak_footer":   "\n\n🛡️ Apply preventive treatment and monitor your crops closely.",
+        "no_outbreak":       "✅ *No active outbreaks detected near you.*",
+        "ask_crop":          "\n\n🌱 *Step 2 — Select Your Crop*\n\nReply with the number:\n" + "\n".join(f"*{i+1}* — {c}" for i, c in enumerate(CROP_LIST)),
+        "crop_set":          "✅ Crop set to *{crop}*.",
+        "ask_photo":         "\n\n📸 *Step 3:* Send a photo of your crop leaf for AI diagnosis.",
         "analysing":         "🔬 Analysing your crop image… please wait.",
         "diagnosis":         "🌿 *CropRadar Diagnosis*\n\n🦠 *Disease:* {disease}\n{confidence}\n\n💊 *Remedy:*\n{remedy}\n\n🛡️ *Prevention:*\n{prevention}\n\n📸 Send another photo to analyse more crops.",
         "outbreak_suffix":   "\n\n━━━━━━━━━━━━━━━━\n🚨 {alert}",
         "error":             "❌ Something went wrong. Please try again.",
         "invalid_location":  "❌ Couldn't read that location.\nTap 📎 → Location, or type:  lat, lon",
         "invalid_choice":    "Please reply *1* for English or *2* for ಕನ್ನಡ.",
+        "invalid_crop":      "Please reply with a number (1-{max}) to select your crop.",
         "audio_failed":      "❌ Couldn't transcribe audio. Please type or send a photo.",
     },
     "kn": {
@@ -61,15 +70,18 @@ STRINGS = {
         "location_received": "✅ ಸ್ಥಳ ಸ್ವೀಕರಿಸಲಾಗಿದೆ — *{lat:.4f}°, {lon:.4f}°*\n\n🔍 ನಿಮ್ಮ ಪ್ರದೇಶದಲ್ಲಿ ರೋಗ ಹರಡುವಿಕೆ ಪರಿಶೀಲಿಸಲಾಗುತ್ತಿದೆ…",
         "outbreak_header":   "⚠️ *ರೋಗ ಹರಡುವಿಕೆ ಎಚ್ಚರಿಕೆ!*\n\nಇತ್ತೀಚೆಗೆ ನಿಮ್ಮ ಬಳಿ ಈ ರೋಗಗಳು ವರದಿಯಾಗಿವೆ:\n",
         "outbreak_row":      "🦠 *{disease}* — 50 ಕಿ.ಮೀ ಒಳಗೆ {count} ವರದಿಗಳು",
-        "outbreak_footer":   "\n\n🛡️ ತಡೆಗಟ್ಟುವ ಚಿಕಿತ್ಸೆ ಅನ್ವಯಿಸಿ ಮತ್ತು ನಿಮ್ಮ ಬೆಳೆಗಳನ್ನು ಗಮನಿಸಿ.\n\n📸 *ಹಂತ 2:* ಈಗ ನಿಮ್ಮ ಬೆಳೆ ಎಲೆಯ ಫೋಟೋ ಕಳುಹಿಸಿ.",
-        "no_outbreak":       "✅ *ನಿಮ್ಮ ಬಳಿ ಯಾವುದೇ ರೋಗ ಹರಡುವಿಕೆ ಕಂಡುಬಂದಿಲ್ಲ.*\n\n📸 *ಹಂತ 2:* ರೋಗ ಪತ್ತೆಗಾಗಿ ನಿಮ್ಮ ಬೆಳೆ ಎಲೆಯ ಫೋಟೋ ಕಳುಹಿಸಿ!",
-        "ask_photo":         "📸 ರೋಗ ನಿರ್ಣಯಕ್ಕಾಗಿ ಬೆಳೆ ಎಲೆಯ *ಫೋಟೋ ಕಳುಹಿಸಿ*.",
+        "outbreak_footer":   "\n\n🛡️ ತಡೆಗಟ್ಟುವ ಚಿಕಿತ್ಸೆ ಅನ್ವಯಿಸಿ ಮತ್ತು ನಿಮ್ಮ ಬೆಳೆಗಳನ್ನು ಗಮನಿಸಿ.",
+        "no_outbreak":       "✅ *ನಿಮ್ಮ ಬಳಿ ಯಾವುದೇ ರೋಗ ಹರಡುವಿಕೆ ಕಂಡುಬಂದಿಲ್ಲ.*",
+        "ask_crop":          "\n\n🌱 *ಹಂತ 2 — ನಿಮ್ಮ ಬೆಳೆ ಆಯ್ಕೆ ಮಾಡಿ*\n\nಸಂಖ್ಯೆ ಉತ್ತರಿಸಿ:\n" + "\n".join(f"*{i+1}* — {c}" for i, c in enumerate(CROP_LIST)),
+        "crop_set":          "✅ ಬೆಳೆ *{crop}* ಗೆ ಹೊಂದಿಸಲಾಗಿದೆ.",
+        "ask_photo":         "\n\n📸 *ಹಂತ 3:* ರೋಗ ಪತ್ತೆಗಾಗಿ ಬೆಳೆ ಎಲೆಯ ಫೋಟೋ ಕಳುಹಿಸಿ.",
         "analysing":         "🔬 ಬೆಳೆ ಚಿತ್ರ ವಿಶ್ಲೇಷಿಸಲಾಗುತ್ತಿದೆ… ದಯವಿಟ್ಟು ನಿರೀಕ್ಷಿಸಿ.",
         "diagnosis":         "🌿 *ಕ್ರಾಪ್‌ರಾಡಾರ್ ರೋಗ ನಿರ್ಣಯ*\n\n🦠 *ರೋಗ:* {disease}\n{confidence}\n\n💊 *ಪರಿಹಾರ:*\n{remedy}\n\n🛡️ *ತಡೆಗಟ್ಟುವಿಕೆ:*\n{prevention}\n\n📸 ಮತ್ತೊಂದು ಫೋಟೋ ಕಳುಹಿಸಬಹುದು.",
         "outbreak_suffix":   "\n\n━━━━━━━━━━━━━━━━\n🚨 {alert}",
         "error":             "❌ ತಪ್ಪಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
         "invalid_location":  "❌ ಸ್ಥಳ ಓದಲಾಗಲಿಲ್ಲ.\n📎 → ಲೊಕೇಶನ್ ಟ್ಯಾಪ್ ಮಾಡಿ, ಅಥವಾ ಟೈಪ್ ಮಾಡಿ:  lat, lon",
         "invalid_choice":    "*1* (English) ಅಥವಾ *2* (ಕನ್ನಡ) ಉತ್ತರಿಸಿ.",
+        "invalid_crop":      "ದಯವಿಟ್ಟು ಬೆಳೆ ಆಯ್ಕೆ ಮಾಡಲು ಸಂಖ್ಯೆ (1-{max}) ಉತ್ತರಿಸಿ.",
         "audio_failed":      "❌ ಆಡಿಯೋ ಅನುವಾದ ವಿಫಲ. ದಯವಿಟ್ಟು ಟೈಪ್ ಮಾಡಿ ಅಥವಾ ಫೋಟೋ ಕಳುಹಿಸಿ.",
     },
 }
@@ -121,7 +133,7 @@ def download_media(url: str) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# Background worker — runs after webhook returns
+# Background workers
 # ---------------------------------------------------------------------------
 def _analyse_and_reply(sender: str, session: dict, media_url: str) -> None:
     lang = session["lang"]
@@ -194,7 +206,6 @@ def _transcribe_and_reply(sender: str, session: dict, media_url: str) -> None:
             send_message(sender, s(lang, "audio_failed"))
             return
 
-        # Process transcribed text as a normal message
         _handle_text(sender, session, text)
 
     except Exception as e:
@@ -217,13 +228,16 @@ def _handle_text(sender: str, session: dict, body: str) -> None:
         else:
             send_message(sender, s(lang, "invalid_location"))
 
+    elif state == WAITING_CROP:
+        _do_crop_selection(sender, session, body)
+
     elif state == WAITING_PHOTO:
         send_message(sender, s(lang, "ask_photo"))
 
 
 def _do_location(sender: str, session: dict, lat: float, lon: float) -> None:
     lang = session["lang"]
-    session.update(lat=lat, lon=lon, state=WAITING_PHOTO)
+    session.update(lat=lat, lon=lon, state=WAITING_CROP)
 
     # Persist location so this user receives future outbreak broadcasts
     database.upsert_whatsapp_user(sender, lang, latitude=lat, longitude=lon)
@@ -266,6 +280,33 @@ def _do_location(sender: str, session: dict, lat: float, lon: float) -> None:
         send_message(sender, "\n".join(lines))
     else:
         send_message(sender, s(lang, "no_outbreak"))
+
+    # Step 5 — ask for crop type
+    send_message(sender, s(lang, "ask_crop"))
+
+
+def _do_crop_selection(sender: str, session: dict, body: str) -> None:
+    """Handle crop type selection by number."""
+    lang = session["lang"]
+    body = body.strip()
+
+    try:
+        idx = int(body) - 1
+        if 0 <= idx < len(CROP_LIST):
+            crop_name = CROP_LIST[idx]
+            session.update(crop_type=crop_name, state=WAITING_PHOTO)
+
+            # Persist crop type
+            database.update_whatsapp_user_crop(sender, crop_name)
+
+            send_message(sender,
+                         s(lang, "crop_set", crop=crop_name) +
+                         s(lang, "ask_photo"))
+            return
+    except ValueError:
+        pass
+
+    send_message(sender, s(lang, "invalid_crop", max=len(CROP_LIST)))
 
 
 # ---------------------------------------------------------------------------
@@ -346,6 +387,15 @@ def whatsapp_webhook():
             ).start()
             return empty_twiml()
         return twiml(s(lang, "invalid_location"))
+
+    # ── Crop selection ────────────────────────────────────────────────────
+    if state == WAITING_CROP:
+        threading.Thread(
+            target=_do_crop_selection,
+            args=(sender, session, body),
+            daemon=True,
+        ).start()
+        return empty_twiml()
 
     return twiml(s(lang, "ask_photo"))
 

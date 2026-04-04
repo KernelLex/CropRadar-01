@@ -151,6 +151,11 @@ Write-Host ""
 Write-Host "  🤖  Telegram Bot" -ForegroundColor White
 Write-Host "      Running via long-polling — no URL needed" -ForegroundColor DarkGreen
 Write-Host ""
+Write-Host "  ⏰  Proactive Scheduler" -ForegroundColor White
+Write-Host "      Daily risk alerts:  7:00 AM IST" -ForegroundColor DarkGreen
+Write-Host "      Weekly crop stage:  Monday 8:00 AM IST" -ForegroundColor DarkGreen
+Write-Host "      Outbreak scan:      Every 6 hours" -ForegroundColor DarkGreen
+Write-Host ""
 Write-Host $divider -ForegroundColor DarkCyan
 Write-Host "  Press Ctrl+C to stop the tunnel." -ForegroundColor DarkGray
 Write-Host "  Close individual windows to stop each service." -ForegroundColor DarkGray

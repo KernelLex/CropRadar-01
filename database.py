@@ -36,9 +36,11 @@ CREATE TABLE IF NOT EXISTS bot_users (
     language          TEXT    DEFAULT 'en',
     latitude          REAL,
     longitude         REAL,
+    crop_type         TEXT,
     is_active         INTEGER DEFAULT 1,
     created_at        TEXT    NOT NULL,
-    last_seen         TEXT    NOT NULL
+    last_seen         TEXT    NOT NULL,
+    registered_at     TEXT
 );
 """
 
@@ -48,9 +50,11 @@ CREATE TABLE IF NOT EXISTS whatsapp_users (
     language    TEXT    DEFAULT 'en',
     latitude    REAL,
     longitude   REAL,
+    crop_type   TEXT,
     is_active   INTEGER DEFAULT 1,
     created_at  TEXT    NOT NULL,
-    last_seen   TEXT    NOT NULL
+    last_seen   TEXT    NOT NULL,
+    registered_at TEXT
 );
 """
 
@@ -60,9 +64,11 @@ CREATE TABLE IF NOT EXISTS app_devices (
     language    TEXT    DEFAULT 'en',
     latitude    REAL,
     longitude   REAL,
+    crop_type   TEXT,
     is_active   INTEGER DEFAULT 1,
     created_at  TEXT    NOT NULL,
-    last_seen   TEXT    NOT NULL
+    last_seen   TEXT    NOT NULL,
+    registered_at TEXT
 );
 """
 
@@ -131,6 +137,17 @@ CREATE TABLE IF NOT EXISTS risk_scores (
 """
 
 
+CREATE_DAILY_ALERTS_LOG_SQL = """
+CREATE TABLE IF NOT EXISTS daily_alerts_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_key    TEXT    NOT NULL,
+    channel     TEXT    NOT NULL,
+    alert_type  TEXT    NOT NULL,
+    sent_at     TEXT    NOT NULL
+);
+"""
+
+
 def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -147,9 +164,16 @@ def init_db() -> None:
         conn.execute(CREATE_WEATHER_SNAPSHOTS_SQL)
         conn.execute(CREATE_NDVI_SNAPSHOTS_SQL)
         conn.execute(CREATE_RISK_SCORES_SQL)
+        conn.execute(CREATE_DAILY_ALERTS_LOG_SQL)
         # Migrations for existing databases
         for migration in [
             "ALTER TABLE disease_reports ADD COLUMN photo_path TEXT",
+            "ALTER TABLE bot_users ADD COLUMN crop_type TEXT",
+            "ALTER TABLE bot_users ADD COLUMN registered_at TEXT",
+            "ALTER TABLE whatsapp_users ADD COLUMN crop_type TEXT",
+            "ALTER TABLE whatsapp_users ADD COLUMN registered_at TEXT",
+            "ALTER TABLE app_devices ADD COLUMN crop_type TEXT",
+            "ALTER TABLE app_devices ADD COLUMN registered_at TEXT",
         ]:
             try:
                 conn.execute(migration)
@@ -307,6 +331,7 @@ def upsert_bot_user(
     language: str,
     latitude: float,
     longitude: float,
+    crop_type: Optional[str] = None,
 ) -> None:
     """Insert or update a Telegram bot user record."""
     now = datetime.utcnow().isoformat()
@@ -315,17 +340,19 @@ def upsert_bot_user(
             """
             INSERT INTO bot_users
                 (chat_id, telegram_user_id, language, latitude, longitude,
-                 is_active, created_at, last_seen)
-            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                 crop_type, is_active, created_at, last_seen, registered_at)
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT(chat_id) DO UPDATE SET
                 telegram_user_id = excluded.telegram_user_id,
                 language         = excluded.language,
                 latitude         = excluded.latitude,
                 longitude        = excluded.longitude,
+                crop_type        = COALESCE(excluded.crop_type, bot_users.crop_type),
                 is_active        = 1,
                 last_seen        = excluded.last_seen
             """,
-            (chat_id, telegram_user_id, language, latitude, longitude, now, now),
+            (chat_id, telegram_user_id, language, latitude, longitude,
+             crop_type, now, now, now),
         )
         conn.commit()
 
@@ -349,6 +376,147 @@ def get_nearby_users(
         dict(r) for r in rows
         if _haversine_km(lat, lon, r["latitude"], r["longitude"]) <= radius_km
     ]
+
+
+# ---------------------------------------------------------------------------
+# Crop type helpers
+# ---------------------------------------------------------------------------
+
+def update_bot_user_crop(chat_id: int, crop_type: str) -> None:
+    """Set or update the crop type for a Telegram user."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE bot_users SET crop_type = ? WHERE chat_id = ?",
+            (crop_type, chat_id),
+        )
+        conn.commit()
+
+
+def update_whatsapp_user_crop(wa_number: str, crop_type: str) -> None:
+    """Set or update the crop type for a WhatsApp user."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE whatsapp_users SET crop_type = ? WHERE wa_number = ?",
+            (crop_type, wa_number),
+        )
+        conn.commit()
+
+
+def update_app_device_crop(fcm_token: str, crop_type: str) -> None:
+    """Set or update the crop type for an app device."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE app_devices SET crop_type = ? WHERE fcm_token = ?",
+            (crop_type, fcm_token),
+        )
+        conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Proactive-alert helpers
+# ---------------------------------------------------------------------------
+
+def get_all_active_bot_users() -> list[dict]:
+    """Return all active Telegram users with a saved location."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT chat_id, telegram_user_id, language, latitude, longitude,
+                   crop_type, registered_at
+            FROM bot_users
+            WHERE is_active = 1
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            """
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_all_active_whatsapp_users() -> list[dict]:
+    """Return all active WhatsApp users with a saved location."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT wa_number, language, latitude, longitude,
+                   crop_type, registered_at
+            FROM whatsapp_users
+            WHERE is_active = 1
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            """
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_all_active_app_devices() -> list[dict]:
+    """Return all active FCM devices with a saved location."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT fcm_token, language, latitude, longitude,
+                   crop_type, registered_at
+            FROM app_devices
+            WHERE is_active = 1
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            """
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def was_alert_sent_today(user_key: str, alert_type: str) -> bool:
+    """Check if a proactive alert was already sent to this user today."""
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT 1 FROM daily_alerts_log
+            WHERE user_key = ? AND alert_type = ? AND sent_at >= ?
+            LIMIT 1
+            """,
+            (str(user_key), alert_type, today),
+        ).fetchone()
+    return row is not None
+
+
+def was_alert_sent_this_week(user_key: str, alert_type: str) -> bool:
+    """Check if a proactive alert was already sent to this user this week."""
+    week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT 1 FROM daily_alerts_log
+            WHERE user_key = ? AND alert_type = ? AND sent_at >= ?
+            LIMIT 1
+            """,
+            (str(user_key), alert_type, week_ago),
+        ).fetchone()
+    return row is not None
+
+
+def record_alert_sent(user_key: str, channel: str, alert_type: str) -> None:
+    """Log that a proactive alert was sent."""
+    now = datetime.utcnow().isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO daily_alerts_log (user_key, channel, alert_type, sent_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (str(user_key), channel, alert_type, now),
+        )
+        conn.commit()
+
+
+def get_alert_log(limit: int = 100) -> list[dict]:
+    """Return recent proactive alert log entries."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM daily_alerts_log ORDER BY sent_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
 
 
 # ---------------------------------------------------------------------------
@@ -583,6 +751,7 @@ def upsert_whatsapp_user(
     language: str,
     latitude: Optional[float] = None,
     longitude: Optional[float] = None,
+    crop_type: Optional[str] = None,
 ) -> None:
     """Insert or update a WhatsApp bot user record."""
     now = datetime.utcnow().isoformat()
@@ -590,16 +759,18 @@ def upsert_whatsapp_user(
         conn.execute(
             """
             INSERT INTO whatsapp_users
-                (wa_number, language, latitude, longitude, is_active, created_at, last_seen)
-            VALUES (?, ?, ?, ?, 1, ?, ?)
+                (wa_number, language, latitude, longitude, crop_type,
+                 is_active, created_at, last_seen, registered_at)
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT(wa_number) DO UPDATE SET
                 language   = excluded.language,
                 latitude   = COALESCE(excluded.latitude,  whatsapp_users.latitude),
                 longitude  = COALESCE(excluded.longitude, whatsapp_users.longitude),
+                crop_type  = COALESCE(excluded.crop_type, whatsapp_users.crop_type),
                 is_active  = 1,
                 last_seen  = excluded.last_seen
             """,
-            (wa_number, language, latitude, longitude, now, now),
+            (wa_number, language, latitude, longitude, crop_type, now, now, now),
         )
         conn.commit()
 
@@ -633,6 +804,7 @@ def upsert_app_device(
     language: str = "en",
     latitude: Optional[float] = None,
     longitude: Optional[float] = None,
+    crop_type: Optional[str] = None,
 ) -> None:
     """Insert or update a Flutter app FCM device token."""
     now = datetime.utcnow().isoformat()
@@ -640,16 +812,18 @@ def upsert_app_device(
         conn.execute(
             """
             INSERT INTO app_devices
-                (fcm_token, language, latitude, longitude, is_active, created_at, last_seen)
-            VALUES (?, ?, ?, ?, 1, ?, ?)
+                (fcm_token, language, latitude, longitude, crop_type,
+                 is_active, created_at, last_seen, registered_at)
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT(fcm_token) DO UPDATE SET
                 language   = excluded.language,
                 latitude   = COALESCE(excluded.latitude,  app_devices.latitude),
                 longitude  = COALESCE(excluded.longitude, app_devices.longitude),
+                crop_type  = COALESCE(excluded.crop_type, app_devices.crop_type),
                 is_active  = 1,
                 last_seen  = excluded.last_seen
             """,
-            (fcm_token, language, latitude, longitude, now, now),
+            (fcm_token, language, latitude, longitude, crop_type, now, now, now),
         )
         conn.commit()
 
