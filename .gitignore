@@ -22,6 +22,15 @@ env/
 *.db
 *.sqlite3
 
+# Firebase service account keys (contain private keys — NEVER commit!)
+*service-account*.json
+*adminsdk*.json
+firebase-*.json
+google-services.json
+
+# Crop photos uploaded by users
+photos/
+
 # Logs
 *.log
 

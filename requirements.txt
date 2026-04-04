@@ -28,5 +28,5 @@ pillow>=10.0.0
 requests>=2.31.0
 python-dotenv>=1.0.0
 
-# --- Push notifications (FCM via legacy HTTP — no extra package needed) ---
-# FCM_SERVER_KEY env var enables app push. Set it in .env.
+# --- Push notifications (FCM V1 API via service account) ---
+cryptography>=42.0.0   # JWT signing for FCM OAuth2 token exchange
