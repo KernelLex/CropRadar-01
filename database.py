@@ -5,9 +5,11 @@ database.py - SQLite database layer for CropRadar
 import math
 import sqlite3
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
-DB_PATH = "cropradar.db"
+# Always resolve relative to THIS file so the DB is found regardless of CWD
+DB_PATH = str(Path(__file__).resolve().parent / "cropradar.db")
 
 # ---------------------------------------------------------------------------
 # Schema
@@ -37,6 +39,30 @@ CREATE TABLE IF NOT EXISTS bot_users (
     is_active         INTEGER DEFAULT 1,
     created_at        TEXT    NOT NULL,
     last_seen         TEXT    NOT NULL
+);
+"""
+
+CREATE_WHATSAPP_USERS_SQL = """
+CREATE TABLE IF NOT EXISTS whatsapp_users (
+    wa_number   TEXT    PRIMARY KEY,
+    language    TEXT    DEFAULT 'en',
+    latitude    REAL,
+    longitude   REAL,
+    is_active   INTEGER DEFAULT 1,
+    created_at  TEXT    NOT NULL,
+    last_seen   TEXT    NOT NULL
+);
+"""
+
+CREATE_APP_DEVICES_SQL = """
+CREATE TABLE IF NOT EXISTS app_devices (
+    fcm_token   TEXT    PRIMARY KEY,
+    language    TEXT    DEFAULT 'en',
+    latitude    REAL,
+    longitude   REAL,
+    is_active   INTEGER DEFAULT 1,
+    created_at  TEXT    NOT NULL,
+    last_seen   TEXT    NOT NULL
 );
 """
 
@@ -115,15 +141,20 @@ def init_db() -> None:
     with get_connection() as conn:
         conn.execute(CREATE_TABLE_SQL)
         conn.execute(CREATE_BOT_USERS_SQL)
+        conn.execute(CREATE_WHATSAPP_USERS_SQL)
+        conn.execute(CREATE_APP_DEVICES_SQL)
         conn.execute(CREATE_OUTBREAK_NOTIFICATIONS_SQL)
         conn.execute(CREATE_WEATHER_SNAPSHOTS_SQL)
         conn.execute(CREATE_NDVI_SNAPSHOTS_SQL)
         conn.execute(CREATE_RISK_SCORES_SQL)
-        # Migrate: add photo_path to existing databases that predate this column
-        try:
-            conn.execute("ALTER TABLE disease_reports ADD COLUMN photo_path TEXT")
-        except Exception:
-            pass  # column already exists
+        # Migrations for existing databases
+        for migration in [
+            "ALTER TABLE disease_reports ADD COLUMN photo_path TEXT",
+        ]:
+            try:
+                conn.execute(migration)
+            except Exception:
+                pass
         conn.commit()
 
 
@@ -541,3 +572,103 @@ def get_nearby_disease_history(
             r["distance_km"] = round(dist, 2)
             results.append(r)
     return results
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp user persistence
+# ---------------------------------------------------------------------------
+
+def upsert_whatsapp_user(
+    wa_number: str,
+    language: str,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
+) -> None:
+    """Insert or update a WhatsApp bot user record."""
+    now = datetime.utcnow().isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO whatsapp_users
+                (wa_number, language, latitude, longitude, is_active, created_at, last_seen)
+            VALUES (?, ?, ?, ?, 1, ?, ?)
+            ON CONFLICT(wa_number) DO UPDATE SET
+                language   = excluded.language,
+                latitude   = COALESCE(excluded.latitude,  whatsapp_users.latitude),
+                longitude  = COALESCE(excluded.longitude, whatsapp_users.longitude),
+                is_active  = 1,
+                last_seen  = excluded.last_seen
+            """,
+            (wa_number, language, latitude, longitude, now, now),
+        )
+        conn.commit()
+
+
+def get_nearby_whatsapp_users(
+    lat: float, lon: float, radius_km: float = 50
+) -> list[dict]:
+    """Return active WhatsApp users whose saved location is within radius_km."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT wa_number, language, latitude, longitude
+            FROM whatsapp_users
+            WHERE is_active = 1
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            """
+        ).fetchall()
+    return [
+        dict(r) for r in rows
+        if _haversine_km(lat, lon, r["latitude"], r["longitude"]) <= radius_km
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Flutter app device (FCM) persistence
+# ---------------------------------------------------------------------------
+
+def upsert_app_device(
+    fcm_token: str,
+    language: str = "en",
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
+) -> None:
+    """Insert or update a Flutter app FCM device token."""
+    now = datetime.utcnow().isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_devices
+                (fcm_token, language, latitude, longitude, is_active, created_at, last_seen)
+            VALUES (?, ?, ?, ?, 1, ?, ?)
+            ON CONFLICT(fcm_token) DO UPDATE SET
+                language   = excluded.language,
+                latitude   = COALESCE(excluded.latitude,  app_devices.latitude),
+                longitude  = COALESCE(excluded.longitude, app_devices.longitude),
+                is_active  = 1,
+                last_seen  = excluded.last_seen
+            """,
+            (fcm_token, language, latitude, longitude, now, now),
+        )
+        conn.commit()
+
+
+def get_nearby_app_devices(
+    lat: float, lon: float, radius_km: float = 50
+) -> list[dict]:
+    """Return active FCM tokens whose saved location is within radius_km."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT fcm_token, language, latitude, longitude
+            FROM app_devices
+            WHERE is_active = 1
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            """
+        ).fetchall()
+    return [
+        dict(r) for r in rows
+        if _haversine_km(lat, lon, r["latitude"], r["longitude"]) <= radius_km
+    ]

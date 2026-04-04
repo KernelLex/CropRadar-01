@@ -79,4 +79,33 @@ class ApiService {
     } catch (_) {}
     return [];
   }
+
+  // ---------------------------------------------------------------------------
+  // POST /register-device  — register FCM token for push notifications
+  // ---------------------------------------------------------------------------
+  static Future<void> registerDevice({
+    required String fcmToken,
+    String lang = 'en',
+    double? lat,
+    double? lon,
+  }) async {
+    final uri = Uri.parse('$baseUrl/register-device');
+    try {
+      final body = <String, dynamic>{
+        'fcm_token': fcmToken,
+        'language':  lang,
+      };
+      if (lat != null && lon != null) {
+        body['latitude']  = lat;
+        body['longitude'] = lon;
+      }
+      await http
+          .post(uri,
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode(body))
+          .timeout(const Duration(seconds: 10));
+    } catch (_) {
+      // best-effort — never crash the app over registration failure
+    }
+  }
 }

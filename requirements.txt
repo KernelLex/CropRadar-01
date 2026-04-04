@@ -27,3 +27,6 @@ pandas>=2.0.0
 pillow>=10.0.0
 requests>=2.31.0
 python-dotenv>=1.0.0
+
+# --- Push notifications (FCM via legacy HTTP — no extra package needed) ---
+# FCM_SERVER_KEY env var enables app push. Set it in .env.

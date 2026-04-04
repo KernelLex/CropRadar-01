@@ -16,6 +16,7 @@ import tempfile
 import pathlib
 from flask import Flask, request, Response
 from dotenv import load_dotenv
+import database
 
 load_dotenv()
 
@@ -224,6 +225,9 @@ def _do_location(sender: str, session: dict, lat: float, lon: float) -> None:
     lang = session["lang"]
     session.update(lat=lat, lon=lon, state=WAITING_PHOTO)
 
+    # Persist location so this user receives future outbreak broadcasts
+    database.upsert_whatsapp_user(sender, lang, latitude=lat, longitude=lon)
+
     # Step 1 — immediate confirmation
     send_message(sender, s(lang, "location_received", lat=lat, lon=lon))
 
@@ -288,9 +292,11 @@ def whatsapp_webhook():
     if session["state"] == WAITING_LANGUAGE:
         if body in ("1", "1️⃣"):
             session.update(lang="en", state=WAITING_LOCATION)
+            database.upsert_whatsapp_user(sender, "en")
             return twiml(s("en", "language_set") + "\n\n" + s("en", "ask_location"))
         if body in ("2", "2️⃣"):
             session.update(lang="kn", state=WAITING_LOCATION)
+            database.upsert_whatsapp_user(sender, "kn")
             return twiml(s("kn", "language_set") + "\n\n" + s("kn", "ask_location"))
         return twiml(s("en", "invalid_choice"))
 

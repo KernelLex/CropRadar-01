@@ -146,14 +146,20 @@ def _maybe_broadcast_outbreak(
         )
         return
 
-    # Find eligible users and send alerts
-    users = database.get_nearby_users(lat, lon, radius_km=50)
-    if not users:
+    # Gather users across all three channels
+    telegram_users  = database.get_nearby_users(lat, lon, radius_km=50)
+    whatsapp_users  = database.get_nearby_whatsapp_users(lat, lon, radius_km=50)
+    app_devices     = database.get_nearby_app_devices(lat, lon, radius_km=50)
+
+    if not telegram_users and not whatsapp_users and not app_devices:
         logger.info("Outbreak detected but no nearby users to notify.")
         return
 
     database.record_outbreak_notification(disease_type, lat, lon)
-    notifier.broadcast_outbreak_alert(disease_type, match["count"], users)
+    notifier.broadcast_outbreak_alert(
+        disease_type, match["count"],
+        telegram_users, whatsapp_users, app_devices,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +267,28 @@ def add_report(body: ReportRequest):
     ).start()
 
     return ReportResponse(report_id=report_id, message="Report stored successfully.")
+
+
+class DeviceRegistrationRequest(BaseModel):
+    fcm_token: str
+    language: str = "en"
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+
+@app.post("/register-device", tags=["notifications"])
+def register_device(body: DeviceRegistrationRequest):
+    """
+    Register or update a Flutter app FCM token so it receives
+    proactive outbreak push notifications.
+    """
+    database.upsert_app_device(
+        fcm_token=body.fcm_token,
+        language=body.language,
+        latitude=body.latitude,
+        longitude=body.longitude,
+    )
+    return {"status": "registered"}
 
 
 @app.get("/alerts", response_model=AlertsResponse, tags=["alerts"])
