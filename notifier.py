@@ -55,6 +55,86 @@ def _fmt(disease: str, count: int, lang: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Proactive alert sending (single-user, multi-channel)
+# ---------------------------------------------------------------------------
+
+def send_proactive_telegram(chat_id: int, text: str) -> bool:
+    """Send a proactive message to a single Telegram user."""
+    if not TELEGRAM_TOKEN:
+        return False
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    try:
+        resp = requests.post(url, json={
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "Markdown",
+        }, timeout=10)
+        if resp.ok:
+            return True
+        logger.warning("Proactive TG fail chat_id=%s: %s", chat_id, resp.text)
+    except Exception as exc:
+        logger.warning("Proactive TG error chat_id=%s: %s", chat_id, exc)
+    return False
+
+
+def send_proactive_whatsapp(wa_number: str, text: str) -> bool:
+    """Send a proactive message to a single WhatsApp user."""
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
+        return False
+    url = (f"https://api.twilio.com/2010-04-01/Accounts/"
+           f"{TWILIO_ACCOUNT_SID}/Messages.json")
+    plain = text.replace("*", "")
+    try:
+        resp = requests.post(url,
+            auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+            data={"From": TWILIO_WA_NUMBER, "To": wa_number, "Body": plain},
+            timeout=15)
+        if resp.ok:
+            return True
+        logger.warning("Proactive WA fail %s: %s", wa_number, resp.text)
+    except Exception as exc:
+        logger.warning("Proactive WA error %s: %s", wa_number, exc)
+    return False
+
+
+def send_proactive_fcm(fcm_token: str, title: str, body: str,
+                      data: dict = None) -> bool:
+    """Send a proactive push notification to a single FCM device."""
+    access_token = _get_fcm_access_token()
+    if not access_token:
+        return False
+    try:
+        sa = json.loads(_SA_PATH.read_text())
+        project_id = sa["project_id"]
+    except Exception:
+        return False
+    url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "message": {
+            "token": fcm_token,
+            "notification": {"title": title, "body": body},
+            "data": data or {},
+            "android": {
+                "priority": "high",
+                "notification": {"sound": "default"},
+            },
+        }
+    }
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=10)
+        if resp.ok:
+            return True
+        logger.warning("Proactive FCM fail ...%s: %s", fcm_token[-8:], resp.text)
+    except Exception as exc:
+        logger.warning("Proactive FCM error: %s", exc)
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Master broadcast
 # ---------------------------------------------------------------------------
 

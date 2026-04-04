@@ -24,6 +24,8 @@ import database
 import notifier
 import vision_diagnosis
 import audio_transcription
+import scheduler as scheduler_module
+import crop_stage
 
 # Directory where uploaded crop photos are persisted
 PHOTOS_DIR = Path("photos")
@@ -52,6 +54,18 @@ database.init_db()
 
 # Serve persisted crop photos as static files: GET /photos/{filename}
 app.mount("/photos", StaticFiles(directory=str(PHOTOS_DIR)), name="photos")
+
+
+@app.on_event("startup")
+def startup_event():
+    """Start the proactive alert scheduler when FastAPI boots."""
+    scheduler_module.start_scheduler()
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    """Stop the scheduler gracefully."""
+    scheduler_module.stop_scheduler()
 
 
 # ---------------------------------------------------------------------------
@@ -416,3 +430,70 @@ def get_risk_report(lat: float, lon: float, language: str = "en"):
         "risk_score": result["risk_score"],
         "report_text": report_text,
     }
+
+
+# ---------------------------------------------------------------------------
+# Scheduler & proactive intelligence routes
+# ---------------------------------------------------------------------------
+
+@app.get("/scheduler/status", tags=["scheduler"])
+def scheduler_status():
+    """Check scheduler health: running state, jobs, last run times."""
+    return scheduler_module.get_scheduler_status()
+
+
+@app.post("/scheduler/trigger-daily", tags=["scheduler"])
+def trigger_daily():
+    """Manually trigger the daily risk alert job (admin/testing)."""
+    import threading
+    threading.Thread(target=scheduler_module.trigger_daily_job, daemon=True).start()
+    return {"status": "triggered", "job": "daily_risk"}
+
+
+@app.post("/scheduler/trigger-weekly", tags=["scheduler"])
+def trigger_weekly():
+    """Manually trigger the weekly stage intelligence job (admin/testing)."""
+    import threading
+    threading.Thread(target=scheduler_module.trigger_weekly_job, daemon=True).start()
+    return {"status": "triggered", "job": "weekly_stage"}
+
+
+@app.post("/scheduler/trigger-outbreak-scan", tags=["scheduler"])
+def trigger_outbreak():
+    """Manually trigger the outbreak cluster scan."""
+    import threading
+    threading.Thread(target=scheduler_module.trigger_outbreak_scan, daemon=True).start()
+    return {"status": "triggered", "job": "outbreak_scan"}
+
+
+@app.get("/crop-stage", tags=["intelligence"])
+def get_crop_stage(crop_type: str, registered_at: str):
+    """Estimate current crop growth stage from crop type + registration date."""
+    info = crop_stage.estimate_growth_stage(crop_type, registered_at)
+    if not info:
+        raise HTTPException(status_code=400, detail="Cannot estimate stage.")
+    return info
+
+
+@app.get("/crop-stage-report", tags=["intelligence"])
+def get_crop_stage_report(
+    crop_type: str, registered_at: str, language: str = "en",
+):
+    """Get formatted crop stage advisory text."""
+    info = crop_stage.estimate_growth_stage(crop_type, registered_at)
+    if not info:
+        raise HTTPException(status_code=400, detail="Cannot estimate stage.")
+    report = crop_stage.build_stage_report(language, info)
+    return {"stage_info": info, "report_text": report}
+
+
+@app.get("/alerts-log", tags=["scheduler"])
+def get_alerts_log(limit: int = 100):
+    """Return recent proactive alert log entries."""
+    return database.get_alert_log(limit=limit)
+
+
+@app.get("/supported-crops", tags=["intelligence"])
+def get_supported_crops():
+    """Return the list of supported crop types."""
+    return {"crops": crop_stage.SUPPORTED_CROPS}

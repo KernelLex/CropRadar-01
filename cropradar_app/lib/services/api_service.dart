@@ -3,9 +3,9 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  // Android emulator → 10.0.2.2 maps to host machine's localhost.
-  // Physical device on same WiFi → replace with your machine's local IP, e.g. 192.168.1.x
-  static String baseUrl = 'http://10.0.2.2:8000';
+  // Physical device on same WiFi — using PC's local IP.
+  // If off-network, replace with your cloudflared tunnel URL (https://xxxx.trycloudflare.com).
+  static String baseUrl = 'http://10.0.0.76:8000';
 
   // ---------------------------------------------------------------------------
   // POST /analyze-image
